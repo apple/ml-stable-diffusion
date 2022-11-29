@@ -1,0 +1,5 @@
+coremltools
+diffusers[torch]
+torch
+transformers
+scipy
