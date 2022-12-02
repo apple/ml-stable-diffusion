@@ -26,6 +26,37 @@ M2 MacBook Air 8GB Latency (s)  | 18 | 23 | 23 |
 Please see [Important Notes on Performance Benchmarks](#important-notes-on-performance-benchmarks) section for details.
 
 
+## <a name="using-converted-weights"></a> Using Converted Weights from Hugging Face Hub
+
+<details>
+  <summary> Click to expand </summary>
+
+🤗 Hugging Face ran the [conversion procedure](#converting-models-to-coreml) on the following models and made the Core ML weights publicly available in the Hub:
+
+* [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
+* [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5)
+* [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
+
+If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
+
+There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs`, or select the variants you need. For example, to do generation in Python using the `original` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could do something like this:
+
+```Python
+from huggingface_hub import snapshot_download
+
+repo_id = "apple/coreml-stable-diffusion-v1-4"
+variant = "original/packages"
+
+downloaded = snapshot_download(repo_id, allow_patterns=f"{variant}/*")
+```
+
+`downloaded` would be the path in your local filesystem where the model checkpoint was saved.
+
+Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details on this process.
+
+</details>
+
+
 ## <a name="converting-models-to-coreml"></a> Converting Models to Core ML
 
 <details>
