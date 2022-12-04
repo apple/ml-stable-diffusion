@@ -59,7 +59,7 @@ public extension StableDiffusionPipeline {
             safetyChecker = SafetyChecker(model: checkerModel)
         }
 
-        // Construct pipelien
+        // Construct pipeline
         self.init(textEncoder: textEncoder,
                   unet: unet,
                   decoder: decoder,
