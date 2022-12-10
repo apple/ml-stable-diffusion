@@ -145,7 +145,7 @@ struct StableDiffusionSample: ParsableCommand {
     }
 
     func imageName(_ sample: Int, step: Int? = nil) -> String {
-        var fileCharLimit: Int = 75
+        let fileCharLimit = 75
         var name = prompt.prefix(fileCharLimit).replacingOccurrences(of: " ", with: "_")
         if imageCount != 1 {
             name += ".\(sample)"
