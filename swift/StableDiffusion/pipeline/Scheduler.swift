@@ -46,6 +46,29 @@ public extension Scheduler {
     var initNoiseSigma: Float { 1 }
 }
 
+public extension Scheduler {
+    /// Compute weighted sum of shaped arrays of equal shapes
+    ///
+    /// - Parameters:
+    ///   - weights: The weights each array is multiplied by
+    ///   - values: The arrays to be weighted and summed
+    /// - Returns: sum_i weights[i]*values[i]
+    func weightedSum(_ weights: [Double], _ values: [MLShapedArray<Float32>]) -> MLShapedArray<Float32> {
+        assert(weights.count > 1 && values.count == weights.count)
+        assert(values.allSatisfy({$0.scalarCount == values.first!.scalarCount}))
+        var w = Float(weights.first!)
+        var scalars = values.first!.scalars.map({ $0 * w })
+        for next in 1 ..< values.count {
+            w = Float(weights[next])
+            let nextScalars = values[next].scalars
+            for i in 0 ..< scalars.count {
+                scalars[i] += w * nextScalars[i]
+            }
+        }
+        return MLShapedArray(scalars: scalars, shape: values.first!.shape)
+    }
+}
+
 /// How to map a beta range to a sequence of betas to step over
 public enum BetaSchedule {
     /// Linear stepping between start and end
@@ -186,27 +209,6 @@ public final class PNDMScheduler: Scheduler {
         let prevSample = previousSample(sample, timeStep, prevStep, modelOutput)
         counter += 1
         return prevSample
-    }
-
-    /// Compute weighted sum of shaped arrays of equal shapes
-    ///
-    /// - Parameters:
-    ///   - weights: The weights each array is multiplied by
-    ///   - values: The arrays to be weighted and summed
-    /// - Returns: sum_i weights[i]*values[i]
-    func weightedSum(_ weights: [Double], _ values: [MLShapedArray<Float32>]) -> MLShapedArray<Float32> {
-        assert(weights.count > 1 && values.count == weights.count)
-        assert(values.allSatisfy({$0.scalarCount == values.first!.scalarCount}))
-        var w = Float(weights.first!)
-        var scalars = values.first!.scalars.map({ $0 * w })
-        for next in 1 ..< values.count {
-            w = Float(weights[next])
-            let nextScalars = values[next].scalars
-            for i in 0 ..< scalars.count {
-                scalars[i] += w * nextScalars[i]
-            }
-        }
-        return MLShapedArray(scalars: scalars, shape: values.first!.shape)
     }
 
     /// Compute  sample (denoised image) at previous step given a current time step
