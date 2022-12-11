@@ -68,7 +68,7 @@ public struct StableDiffusionPipeline {
         prompt: String,
         imageCount: Int = 1,
         stepCount: Int = 50,
-        seed: Int = 0,
+        seed: UInt32 = 0,
         disableSafety: Bool = false,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
@@ -140,11 +140,11 @@ public struct StableDiffusionPipeline {
         return try decodeToImages(latents, disableSafety: disableSafety)
     }
 
-    func generateLatentSamples(_ count: Int, stdev: Float, seed: Int) -> [MLShapedArray<Float32>] {
+    func generateLatentSamples(_ count: Int, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
 
-        var random = NumPyRandomSource(seed: UInt32(seed))
+        var random = NumPyRandomSource(seed: seed)
         let samples = (0..<count).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
