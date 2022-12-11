@@ -6,6 +6,12 @@ import CoreML
 import Accelerate
 import CoreGraphics
 
+/// Schedulers compatible with StableDiffusionPipeline
+public enum StableDiffusionScheduler {
+    case pndm
+    case dpmpp
+}
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
@@ -70,6 +76,7 @@ public struct StableDiffusionPipeline {
         stepCount: Int = 50,
         seed: Int = 0,
         disableSafety: Bool = false,
+        scheduler: StableDiffusionScheduler = .pndm,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
@@ -86,7 +93,12 @@ public struct StableDiffusionPipeline {
         let hiddenStates = toHiddenStates(concatEmbedding)
 
         /// Setup schedulers
-        let scheduler = (0..<imageCount).map { _ in Scheduler(stepCount: stepCount) }
+        let scheduler: [Scheduler] = (0..<imageCount).map { _ in
+            switch scheduler {
+            case .pndm: return PNDMScheduler(stepCount: stepCount)
+            case .dpmpp: return DPMSolverMultistepScheduler(stepCount: stepCount)
+            }
+        }
         let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
