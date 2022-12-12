@@ -122,9 +122,12 @@ Please use the `--help` flag to learn about batched generation and more.
 ```swift
 import StableDiffusion
 ...
+let resourceURL = Bundle.main.resourceURL?.appending(path: "RESOURCES_FOLDER")
 let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL)
 let image = try pipeline.generateImages(prompt: prompt, seed: seed).first
 ```
+
+RESOURCES_FOLDER is a folder added to your app target that contains the Core ML models (.mlmodelc) and tokenization resources (.txt).
 
 ### Swift Package Details
 
