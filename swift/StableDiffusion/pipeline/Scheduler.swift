@@ -55,7 +55,7 @@ public extension Scheduler {
     /// - Returns: sum_i weights[i]*values[i]
     func weightedSum(_ weights: [Double], _ values: [MLShapedArray<Float32>]) -> MLShapedArray<Float32> {
         assert(weights.count > 1 && values.count == weights.count)
-        assert(values.allSatisfy({$0.scalarCount == values.first!.scalarCount}))
+        assert(values.allSatisfy({ $0.scalarCount == values.first!.scalarCount }))
         var w = Float(weights.first!)
         var scalars = values.first!.scalars.map({ $0 * w })
         for next in 1 ..< values.count {
