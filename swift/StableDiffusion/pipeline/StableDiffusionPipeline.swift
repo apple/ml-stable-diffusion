@@ -8,8 +8,10 @@ import CoreGraphics
 
 /// Schedulers compatible with StableDiffusionPipeline
 public enum StableDiffusionScheduler {
-    case pndm
-    case dpmpp
+    /// Scheduler that uses a pseudo-linear multi-step (PLMS) method
+    case pndmScheduler
+    /// Scheduler that uses a second order DPM-Solver++ algorithm
+    case dpmSolverMultistepScheduler
 }
 
 /// A pipeline used to generate image samples from text input using stable diffusion
@@ -76,7 +78,7 @@ public struct StableDiffusionPipeline {
         stepCount: Int = 50,
         seed: Int = 0,
         disableSafety: Bool = false,
-        scheduler: StableDiffusionScheduler = .pndm,
+        scheduler: StableDiffusionScheduler = .pndmScheduler,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
@@ -95,8 +97,8 @@ public struct StableDiffusionPipeline {
         /// Setup schedulers
         let scheduler: [Scheduler] = (0..<imageCount).map { _ in
             switch scheduler {
-            case .pndm: return PNDMScheduler(stepCount: stepCount)
-            case .dpmpp: return DPMSolverMultistepScheduler(stepCount: stepCount)
+            case .pndmScheduler: return PNDMScheduler(stepCount: stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: stepCount)
             }
         }
         let stdev = scheduler[0].initNoiseSigma
