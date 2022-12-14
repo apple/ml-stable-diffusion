@@ -122,14 +122,12 @@ public final class PNDMScheduler: Scheduler {
         case .scaledLinear:
             self.betas = linspace(pow(betaStart, 0.5), pow(betaEnd, 0.5), trainStepCount).map({ $0 * $0 })
         }
-        
         self.alphas = betas.map({ 1.0 - $0 })
         var alphasCumProd = self.alphas
         for i in 1..<alphasCumProd.count {
             alphasCumProd[i] *= alphasCumProd[i -  1]
         }
         self.alphasCumProd = alphasCumProd
-        
         let stepsOffset = 1 // For stable diffusion
         let stepRatio = Float(trainStepCount / stepCount )
         let forwardSteps = (0..<stepCount).map {
