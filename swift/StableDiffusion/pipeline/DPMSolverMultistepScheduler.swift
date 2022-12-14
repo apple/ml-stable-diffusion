@@ -171,7 +171,9 @@ public final class DPMSolverMultistepScheduler: Scheduler {
                 sample: sample
             )
         }
-        if lowerOrderStepped < solverOrder { lowerOrderStepped += 1 }
+        if lowerOrderStepped < solverOrder {
+            lowerOrderStepped += 1
+        }
         
         return prevSample
     }
