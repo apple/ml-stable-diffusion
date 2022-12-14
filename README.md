@@ -220,6 +220,10 @@ Differences may be less or more pronounced for different inputs. Please see the 
 
 </details>
 
+## <a name="other-projects"></a> External Projects that Use This Library
+
+- [Hugging Face Demo App](https://github.com/huggingface/swift-coreml-diffusers). Source code for native Swift app that runs on macOS, iOS, iPadOS.
+
 ##  <a name="faq"></a> FAQ
 
 <details>
