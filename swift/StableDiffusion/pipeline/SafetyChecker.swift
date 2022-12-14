@@ -6,6 +6,7 @@ import CoreML
 import Accelerate
 
 /// Image safety checking model
+@available(iOS 16.2, macOS 13.1, *)
 public struct SafetyChecker: ResourceManaging {
 
     /// Safety checking Core ML model

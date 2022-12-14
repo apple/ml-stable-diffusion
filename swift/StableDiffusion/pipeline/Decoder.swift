@@ -6,6 +6,7 @@ import CoreML
 import Accelerate
 
 /// A decoder model which produces RGB images from latent samples
+@available(iOS 16.2, macOS 13.1, *)
 public struct Decoder: ResourceManaging {
 
     /// VAE decoder model

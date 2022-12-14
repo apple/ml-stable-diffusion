@@ -8,6 +8,7 @@ import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
 
+@available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
 
     static let configuration = CommandConfiguration(
@@ -176,6 +177,7 @@ enum RunError: Error {
     case saving(String)
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     case all, cpuAndGPU, cpuOnly, cpuAndNeuralEngine
     var asMLComputeUnits: MLComputeUnits {
@@ -188,4 +190,8 @@ enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     }
 }
 
-StableDiffusionSample.main()
+if #available(iOS 16.2, macOS 13.1, *) {
+    StableDiffusionSample.main()
+} else {
+    print("Unsupported OS")
+}

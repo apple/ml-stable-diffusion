@@ -6,9 +6,9 @@ import PackageDescription
 let package = Package(
     name: "stable-diffusion",
     platforms: [
-        .macOS(.v13),
-        .iOS(.v16),
-       ],
+        .macOS(.v11),
+        .iOS(.v14),
+    ],
     products: [
         .library(
             name: "StableDiffusion",

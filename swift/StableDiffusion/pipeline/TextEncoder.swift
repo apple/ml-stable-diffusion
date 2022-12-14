@@ -5,6 +5,7 @@ import Foundation
 import CoreML
 
 ///  A model for encoding text
+@available(iOS 16.2, macOS 13.1, *)
 public struct TextEncoder: ResourceManaging {
 
     /// Text tokenizer
