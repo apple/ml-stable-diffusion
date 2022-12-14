@@ -3,7 +3,7 @@
 
 import CoreML
 
-
+@available(iOS 16.2, macOS 13.1, *)
 public protocol Scheduler {
     /// Number of diffusion steps performed during training
     var trainStepCount: Int { get }
@@ -42,10 +42,12 @@ public protocol Scheduler {
     ) -> MLShapedArray<Float32>
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 public extension Scheduler {
     var initNoiseSigma: Float { 1 }
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 public extension Scheduler {
     /// Compute weighted sum of shaped arrays of equal shapes
     ///
@@ -70,6 +72,7 @@ public extension Scheduler {
 }
 
 /// How to map a beta range to a sequence of betas to step over
+@available(iOS 16.2, macOS 13.1, *)
 public enum BetaSchedule {
     /// Linear stepping between start and end
     case linear
@@ -84,6 +87,7 @@ public enum BetaSchedule {
 ///  [Hugging Face Diffusers PNDMScheduler](https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_pndm.py)
 ///
 /// This scheduler uses the pseudo linear multi-step (PLMS) method only, skipping pseudo Runge-Kutta (PRK) steps
+@available(iOS 16.2, macOS 13.1, *)
 public final class PNDMScheduler: Scheduler {
     public let trainStepCount: Int
     public let inferenceStepCount: Int

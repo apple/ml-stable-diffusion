@@ -576,7 +576,7 @@ def convert_unet(pipe, args):
         # Set the output descriptions
         coreml_unet.output_description["noise_pred"] = \
             "Same shape and dtype as the `sample` input. " \
-            "The predicted noise to faciliate the reverse diffusion (denoising) process"
+            "The predicted noise to facilitate the reverse diffusion (denoising) process"
 
         _save_mlpackage(coreml_unet, out_path)
         logger.info(f"Saved unet into {out_path}")

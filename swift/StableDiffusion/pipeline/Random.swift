@@ -9,6 +9,7 @@ import CoreML
 ///  This implementation matches:
 ///  [NumPy's older randomkit.c](https://github.com/numpy/numpy/blob/v1.0/numpy/random/mtrand/randomkit.c)
 ///
+@available(iOS 16.2, macOS 13.1, *)
 struct NumPyRandomSource: RandomNumberGenerator {
 
     struct State {

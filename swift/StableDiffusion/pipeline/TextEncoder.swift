@@ -5,22 +5,37 @@ import Foundation
 import CoreML
 
 ///  A model for encoding text
-public struct TextEncoder {
+@available(iOS 16.2, macOS 13.1, *)
+public struct TextEncoder: ResourceManaging {
 
     /// Text tokenizer
     var tokenizer: BPETokenizer
 
     /// Embedding model
-    var model: MLModel
+    var model: ManagedMLModel
 
     /// Creates text encoder which embeds a tokenized string
     ///
     /// - Parameters:
     ///   - tokenizer: Tokenizer for input text
-    ///   - model: Model for encoding tokenized text
-    public init(tokenizer: BPETokenizer, model: MLModel) {
+    ///   - url: Location of compiled text encoding  Core ML model
+    ///   - configuration: configuration to be used when the model is loaded
+    /// - Returns: A text encoder that will lazily load its required resources when needed or requested
+    public init(tokenizer: BPETokenizer,
+                modelAt url: URL,
+                configuration: MLModelConfiguration) {
         self.tokenizer = tokenizer
-        self.model = model
+        self.model = ManagedMLModel(modelAt: url, configuration: configuration)
+    }
+
+    /// Ensure the model has been loaded into memory
+    public func loadResources() throws {
+        try model.loadResources()
+    }
+
+    /// Unload the underlying model to free up memory
+    public func unloadResources() {
+       model.unloadResources()
     }
 
     /// Encode input text/string
@@ -60,13 +75,18 @@ public struct TextEncoder {
         let inputFeatures = try! MLDictionaryFeatureProvider(
             dictionary: [inputName: MLMultiArray(inputArray)])
 
-        let result = try queue.sync { try model.prediction(from: inputFeatures) }
+        let result = try model.perform { model in
+            try model.prediction(from: inputFeatures)
+        }
+
         let embeddingFeature = result.featureValue(for: "last_hidden_state")
         return MLShapedArray<Float32>(converting: embeddingFeature!.multiArrayValue!)
     }
 
     var inputDescription: MLFeatureDescription {
-        model.modelDescription.inputDescriptionsByName.first!.value
+        try! model.perform { model in
+            model.modelDescription.inputDescriptionsByName.first!.value
+        }
     }
 
     var inputShape: [Int] {

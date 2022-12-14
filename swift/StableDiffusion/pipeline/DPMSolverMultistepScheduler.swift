@@ -16,6 +16,7 @@ import CoreML
 ///  - Assumes the model predicts epsilon.
 ///  - No dynamic thresholding.
 ///  - `midpoint` solver algorithm.
+@available(iOS 16.2, macOS 13.1, *)
 public final class DPMSolverMultistepScheduler: Scheduler {
     public let trainStepCount: Int
     public let inferenceStepCount: Int

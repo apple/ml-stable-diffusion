@@ -18,6 +18,7 @@ import Foundation
 /// print(String(format: "mean: %.2f, var: %.2f",
 ///              timer.mean, timer.variance))
 /// ```
+@available(iOS 16.2, macOS 13.1, *)
 public final class SampleTimer: Codable {
     var startTime: CFAbsoluteTime?
     var sum: Double = 0.0
