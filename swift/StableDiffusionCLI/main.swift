@@ -8,6 +8,7 @@ import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
 
+@available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
 
     static let configuration = CommandConfiguration(
@@ -55,6 +56,9 @@ struct StableDiffusionSample: ParsableCommand {
     @Flag(help: "Disable safety checking")
     var disableSafety: Bool = false
 
+    @Flag(help: "Reduce memory usage")
+    var reduceMemory: Bool = false
+
     mutating func run() throws {
         guard FileManager.default.fileExists(atPath: resourcePath) else {
             throw RunError.resources("Resource path does not exist \(resourcePath)")
@@ -68,7 +72,9 @@ struct StableDiffusionSample: ParsableCommand {
         log("(Note: This can take a while the first time using these resources)\n")
         let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL,
                                                    configuration: config,
-                                                   disableSafety: disableSafety)
+                                                   disableSafety: disableSafety,
+                                                   reduceMemory: reduceMemory)
+        try pipeline.loadResources()
 
         log("Sampling ...\n")
         let sampleTimer = SampleTimer()
@@ -171,6 +177,7 @@ enum RunError: Error {
     case saving(String)
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     case all, cpuAndGPU, cpuOnly, cpuAndNeuralEngine
     var asMLComputeUnits: MLComputeUnits {
@@ -183,4 +190,8 @@ enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     }
 }
 
-StableDiffusionSample.main()
+if #available(iOS 16.2, macOS 13.1, *) {
+    StableDiffusionSample.main()
+} else {
+    print("Unsupported OS")
+}

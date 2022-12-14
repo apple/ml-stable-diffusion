@@ -9,6 +9,7 @@ import CoreML
 ///  [Hugging Face Diffusers PNDMScheduler](https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_pndm.py)
 ///
 /// It uses the pseudo linear multi-step (PLMS) method only, skipping pseudo Runge-Kutta (PRK) steps
+@available(iOS 16.2, macOS 13.1, *)
 public final class Scheduler {
     /// Number of diffusion steps performed during training
     public let trainStepCount: Int
@@ -224,6 +225,7 @@ public final class Scheduler {
     }
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 extension Scheduler {
     /// How to map a beta range to a sequence of betas to step over
     public enum BetaSchedule {

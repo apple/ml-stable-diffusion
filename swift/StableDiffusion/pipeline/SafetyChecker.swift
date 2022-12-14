@@ -6,22 +6,31 @@ import CoreML
 import Accelerate
 
 /// Image safety checking model
-public struct SafetyChecker {
+@available(iOS 16.2, macOS 13.1, *)
+public struct SafetyChecker: ResourceManaging {
 
     /// Safety checking Core ML model
-    var model: MLModel
+    var model: ManagedMLModel
 
     /// Creates safety checker
     ///
     /// - Parameters:
-    ///     - model: Underlying model which performs the safety check
-    /// - Returns: Safety checker ready from checks
-    public init(model: MLModel) {
-        self.model = model
+    ///     - url: Location of compiled safety checking  Core ML model
+    ///     - configuration: configuration to be used when the model is loaded
+    /// - Returns: A safety cherker that will lazily load its required resources when needed or requested
+    public init(modelAt url: URL, configuration: MLModelConfiguration) {
+        self.model = ManagedMLModel(modelAt: url, configuration: configuration)
     }
 
-    /// Prediction queue
-    let queue = DispatchQueue(label: "safetycheker.predict")
+    /// Ensure the model has been loaded into memory
+    public func loadResources() throws {
+        try model.loadResources()
+    }
+
+    /// Unload the underlying model to free up memory
+    public func unloadResources() {
+       model.unloadResources()
+    }
 
     typealias PixelBufferPFx1 = vImage.PixelBuffer<vImage.PlanarF>
     typealias PixelBufferP8x1 = vImage.PixelBuffer<vImage.Planar8>
@@ -49,7 +58,9 @@ public struct SafetyChecker {
         let adjustmentName = "adjustment"
         let imagesNames = "images"
 
-        let inputInfo = model.modelDescription.inputDescriptionsByName
+        let inputInfo = try model.perform { model in
+            model.modelDescription.inputDescriptionsByName
+        }
         let inputShape = inputInfo[inputName]!.multiArrayConstraint!.shape
 
         let width = inputShape[2].intValue
@@ -74,7 +85,9 @@ public struct SafetyChecker {
             throw SafetyCheckError.modelInputFailure
         }
 
-        let result = try queue.sync { try model.prediction(from: input) }
+        let result = try model.perform { model in
+            try model.prediction(from: input)
+        }
 
         let output = result.featureValue(for: "has_nsfw_concepts")
 
