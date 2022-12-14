@@ -38,7 +38,7 @@ from python_coreml_stable_diffusion.coreml_model import (
 import time
 import torch  # Only used for `torch.from_tensor` in `pipe.scheduler.step()`
 from transformers import CLIPFeatureExtractor, CLIPTokenizer
-from typing import Union, Optional
+from typing import List, Optional, Union
 
 
 class CoreMLStableDiffusionPipeline(DiffusionPipeline):
