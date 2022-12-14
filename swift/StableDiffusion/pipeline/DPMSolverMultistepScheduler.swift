@@ -37,7 +37,7 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     // Stores solverOrder (2) items
     private(set) var modelOutputs: [MLShapedArray<Float32>] = []
 
-    /// Create a scheduler that uses a pseudo linear multi-step (PLMS)  method
+    /// Create a scheduler that uses a second order DPM-Solver++ algorithm.
     ///
     /// - Parameters:
     ///   - stepCount: Number of inference steps to schedule
