@@ -74,23 +74,23 @@ class TestStableDiffusionForTextToImage(unittest.TestCase):
         with self.subTest(model="vae_decoder"):
             logger.info("Converting vae_decoder")
             torch2coreml.convert_vae_decoder(self.pytorch_pipe, self.cli_args)
-            logger.info("Successfuly converted vae_decoder")
+            logger.info("Successfully converted vae_decoder")
 
         with self.subTest(model="unet"):
             logger.info("Converting unet")
             torch2coreml.convert_unet(self.pytorch_pipe, self.cli_args)
-            logger.info("Successfuly converted unet")
+            logger.info("Successfully converted unet")
 
         with self.subTest(model="text_encoder"):
             logger.info("Converting text_encoder")
             torch2coreml.convert_text_encoder(self.pytorch_pipe, self.cli_args)
-            logger.info("Successfuly converted text_encoder")
+            logger.info("Successfully converted text_encoder")
 
         with self.subTest(model="safety_checker"):
             logger.info("Converting safety_checker")
             torch2coreml.convert_safety_checker(self.pytorch_pipe,
                                                 self.cli_args)
-            logger.info("Successfuly converted safety_checker")
+            logger.info("Successfully converted safety_checker")
 
     def test_end_to_end_image_generation_speed(self):
         """ Tests:

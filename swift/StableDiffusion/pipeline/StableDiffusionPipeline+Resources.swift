@@ -75,7 +75,7 @@ public extension StableDiffusionPipeline {
             safetyChecker = SafetyChecker(modelAt: urls.safetyCheckerURL, configuration: config)
         }
 
-        // Construct pipelien
+        // Construct pipeline
         self.init(textEncoder: textEncoder,
                   unet: unet,
                   decoder: decoder,
