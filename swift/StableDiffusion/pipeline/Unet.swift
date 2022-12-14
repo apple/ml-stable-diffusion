@@ -5,6 +5,7 @@ import Foundation
 import CoreML
 
 /// U-Net noise prediction model for stable diffusion
+@available(iOS 16.2, macOS 13.1, *)
 public struct Unet: ResourceManaging {
 
     /// Model used to predict noise residuals given an input, diffusion time step, and conditional embedding

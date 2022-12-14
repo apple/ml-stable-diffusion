@@ -4,6 +4,7 @@
 import Foundation
 import CoreML
 
+@available(iOS 16.2, macOS 13.1, *)
 public extension StableDiffusionPipeline {
 
     struct ResourceURLs {

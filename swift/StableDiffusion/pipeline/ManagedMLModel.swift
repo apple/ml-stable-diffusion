@@ -7,6 +7,7 @@ import CoreML
 ///
 /// It will automatically load a model into memory when needed or requested
 /// It allows one to request to unload the model from memory
+@available(iOS 16.2, macOS 13.1, *)
 public final class ManagedMLModel: ResourceManaging {
 
     /// The location of the model

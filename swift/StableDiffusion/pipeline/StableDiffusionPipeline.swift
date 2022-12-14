@@ -10,6 +10,7 @@ import CoreGraphics
 ///
 /// This implementation matches:
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
+@available(iOS 16.2, macOS 13.1, *)
 public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Model to generate embeddings for tokenized input text
@@ -271,6 +272,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 extension StableDiffusionPipeline {
     /// Sampling progress details
     public struct Progress {
