@@ -53,6 +53,9 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Compute units to load model with {all,cpuOnly,cpuAndGPU,cpuAndNeuralEngine}")
     var computeUnits: ComputeUnits = .all
 
+    @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
+    var scheduler: SchedulerOption = .pndm
+
     @Flag(help: "Disable safety checking")
     var disableSafety: Bool = false
 
@@ -84,7 +87,8 @@ struct StableDiffusionSample: ParsableCommand {
             prompt: prompt,
             imageCount: imageCount,
             stepCount: stepCount,
-            seed: seed
+            seed: seed,
+            scheduler: scheduler.stableDiffusionScheduler
         ) { progress in
             sampleTimer.stop()
             handleProgress(progress,sampleTimer)
@@ -186,6 +190,17 @@ enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
         case .cpuAndGPU: return .cpuAndGPU
         case .cpuOnly: return .cpuOnly
         case .cpuAndNeuralEngine: return .cpuAndNeuralEngine
+        }
+    }
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+enum SchedulerOption: String, ExpressibleByArgument {
+    case pndm, dpmpp
+    var stableDiffusionScheduler: StableDiffusionScheduler {
+        switch self {
+        case .pndm: return .pndmScheduler
+        case .dpmpp: return .dpmSolverMultistepScheduler
         }
     }
 }
