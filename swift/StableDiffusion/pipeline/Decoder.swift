@@ -6,21 +6,30 @@ import CoreML
 import Accelerate
 
 /// A decoder model which produces RGB images from latent samples
-public struct Decoder {
+public struct Decoder: ResourceManaging {
 
     /// VAE decoder model
-    var model: MLModel
+    var model: ManagedMLModel
 
     /// Create decoder from Core ML model
     ///
-    /// - Parameters
-    ///     - model: Core ML model for VAE decoder
-    public init(model: MLModel) {
-        self.model = model
+    /// - Parameters:
+    ///     - url: Location of compiled VAE decoder Core ML model
+    ///     - configuration: configuration to be used when the model is loaded
+    /// - Returns: A decoder that will lazily load its required resources when needed or requested
+    public init(modelAt url: URL, configuration: MLModelConfiguration) {
+        self.model = ManagedMLModel(modelAt: url, configuration: configuration)
     }
 
-    /// Prediction queue
-    let queue = DispatchQueue(label: "decoder.predict")
+    /// Ensure the model has been loaded into memory
+    public func loadResources() throws {
+        try model.loadResources()
+    }
+
+    /// Unload the underlying model to free up memory
+    public func unloadResources() {
+       model.unloadResources()
+    }
 
     /// Batch decode latent samples into images
     ///
@@ -42,7 +51,9 @@ public struct Decoder {
         let batch = MLArrayBatchProvider(array: inputs)
 
         // Batch predict with model
-        let results = try queue.sync { try model.predictions(fromBatch: batch) }
+        let results = try model.perform { model in
+            try model.predictions(fromBatch: batch)
+        }
 
         // Transform the outputs to CGImages
         let images: [CGImage] = (0..<results.count).map { i in
@@ -57,7 +68,9 @@ public struct Decoder {
     }
 
     var inputName: String {
-        model.modelDescription.inputDescriptionsByName.first!.key
+        try! model.perform { model in
+            model.modelDescription.inputDescriptionsByName.first!.key
+        }
     }
 
     typealias PixelBufferPFx1 = vImage.PixelBuffer<vImage.PlanarF>
