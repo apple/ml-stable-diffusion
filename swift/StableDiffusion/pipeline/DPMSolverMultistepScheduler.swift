@@ -1,6 +1,7 @@
 // For licensing see accompanying LICENSE.md file.
 // Copyright (C) 2022 Apple Inc. and The HuggingFace Team. All Rights Reserved.
 
+import Accelerate
 import CoreML
 
 /// A scheduler used to compute a de-noised image
@@ -71,8 +72,8 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         self.alphasCumProd = alphasCumProd
 
         // Currently we only support VP-type noise shedule
-        self.alpha_t = self.alphasCumProd.map { sqrt($0) }
-        self.sigma_t = self.alphasCumProd.map { sqrt(1 - $0) }
+        self.alpha_t = vForce.sqrt(self.alphasCumProd)
+        self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
         self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
 
         self.timeSteps = linspace(0, Float(self.trainStepCount-1), stepCount).reversed().map { Int(round($0)) }
