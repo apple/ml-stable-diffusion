@@ -6,6 +6,14 @@ import CoreML
 import Accelerate
 import CoreGraphics
 
+/// Schedulers compatible with StableDiffusionPipeline
+public enum StableDiffusionScheduler {
+    /// Scheduler that uses a pseudo-linear multi-step (PLMS) method
+    case pndmScheduler
+    /// Scheduler that uses a second order DPM-Solver++ algorithm
+    case dpmSolverMultistepScheduler
+}
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
@@ -113,6 +121,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         stepCount: Int = 50,
         seed: Int = 0,
         disableSafety: Bool = false,
+        scheduler: StableDiffusionScheduler = .pndmScheduler,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
@@ -133,7 +142,12 @@ public struct StableDiffusionPipeline: ResourceManaging {
         let hiddenStates = toHiddenStates(concatEmbedding)
 
         /// Setup schedulers
-        let scheduler = (0..<imageCount).map { _ in Scheduler(stepCount: stepCount) }
+        let scheduler: [Scheduler] = (0..<imageCount).map { _ in
+            switch scheduler {
+            case .pndmScheduler: return PNDMScheduler(stepCount: stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: stepCount)
+            }
+        }
         let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
