@@ -136,7 +136,7 @@ let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL)
 pipeline.loadResources()
 let image = try pipeline.generateImages(prompt: prompt, seed: seed).first
 ```
-On iOS, the `reduceMemory` option should bet set to `true` when constructing `StableDiffusionPipeline`
+On iOS, the `reduceMemory` option should be set to `true` when constructing `StableDiffusionPipeline`
 
 ### Swift Package Details
 
