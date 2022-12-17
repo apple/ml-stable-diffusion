@@ -9,6 +9,7 @@ import StableDiffusion
 import UniformTypeIdentifiers
 
 @available(iOS 16.2, macOS 13.1, *)
+@main
 struct StableDiffusionSample: ParsableCommand {
 
     static let configuration = CommandConfiguration(
@@ -204,10 +205,4 @@ enum SchedulerOption: String, ExpressibleByArgument {
         case .dpmpp: return .dpmSolverMultistepScheduler
         }
     }
-}
-
-if #available(iOS 16.2, macOS 13.1, *) {
-    StableDiffusionSample.main()
-} else {
-    print("Unsupported OS")
 }
