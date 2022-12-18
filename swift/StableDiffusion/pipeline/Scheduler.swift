@@ -12,7 +12,7 @@ public protocol Scheduler {
     var inferenceStepCount: Int { get }
     
     /// Training diffusion time steps index by inference time step
-    var allTimeSteps: [Int] { get }
+    var timeSteps: [Int] { get }
 
     /// Training diffusion time steps index by inference time step
     func calculateTimesteps(strength: Float?) -> [Int]
@@ -94,9 +94,9 @@ public extension Scheduler {
 public extension Scheduler {
     
     func calculateTimesteps(strength: Float?) -> [Int] {
-        guard let strength else { return allTimeSteps.reversed() }
+        guard let strength else { return timeSteps.reversed() }
         let startStep = Int(Float(inferenceStepCount) * strength)
-        let acutalTimesteps = Array(allTimeSteps[0..<startStep].reversed())
+        let acutalTimesteps = Array(timeSteps[0..<startStep].reversed())
         return acutalTimesteps
     }
 }
@@ -127,11 +127,7 @@ public final class PNDMScheduler: Scheduler {
     public let betas: [Float]
     public let alphas: [Float]
     public let alphasCumProd: [Float]
-    private let timeSteps: [Int]
-    
-    public var allTimeSteps: [Int] {
-        timeSteps
-    }
+    public let timeSteps: [Int]
 
     // Internal state
     var counter: Int
