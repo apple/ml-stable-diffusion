@@ -20,6 +20,10 @@ public enum StableDiffusionScheduler {
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
 @available(iOS 16.2, macOS 13.1, *)
 public struct StableDiffusionPipeline: ResourceManaging {
+    
+    public enum Error: String, Swift.Error {
+        case startingImageProvidedWithoutEncoder
+    }
 
     /// Model to generate embeddings for tokenized input text
     var textEncoder: TextEncoder
@@ -29,6 +33,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Model used to generate final image from latent diffusion process
     var decoder: Decoder
+    
+    /// Model used to latent space for image2image, and soon, in-painting
+    var encoder: Encoder?
 
     /// Optional model for checking safety of generated image
     var safetyChecker: SafetyChecker? = nil
@@ -58,11 +65,13 @@ public struct StableDiffusionPipeline: ResourceManaging {
     public init(textEncoder: TextEncoder,
                 unet: Unet,
                 decoder: Decoder,
+                encoder: Encoder?,
                 safetyChecker: SafetyChecker? = nil,
                 reduceMemory: Bool = false) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
+        self.encoder = encoder
         self.safetyChecker = safetyChecker
         self.reduceMemory = reduceMemory
     }
@@ -114,6 +123,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
     public func generateImages(
         prompt: String,
         negativePrompt: String = "",
+        startingImage: CGImage? = nil,
+        strength: Float = 1.0,
         imageCount: Int = 1,
         stepCount: Int = 50,
         seed: UInt32 = 0,
@@ -150,10 +161,31 @@ public struct StableDiffusionPipeline: ResourceManaging {
         let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
-        var latents = generateLatentSamples(imageCount, stdev: stdev, seed: seed)
+        var latents: [MLShapedArray<Float32>]
+        let timestepStrength: Float?
+        
+        if let startingImage {
+            timestepStrength = strength
+            guard let encoder else {
+                throw Error.startingImageProvidedWithoutEncoder
+            }
+            let noiseTuples = generateImage2ImageLatentSamples(imageCount, stdev: 1, seed: seed)
+            latents = try noiseTuples.map({
+                try encoder.encode(
+                    image: startingImage,
+                    diagonalNoise: $0.diagonal,
+                    noise: $0.latentNoise,
+                    alphasCumprodStep: scheduler[0].calculateAlphasCumprod(strength: strength))
+            })
+        } else {
+            timestepStrength = nil
+            // Generate random latent samples from specified seed
+            latents = generateLatentSamples(imageCount, stdev: stdev, seed: seed)
+        }
 
         // De-noising loop
-        for (step,t) in scheduler[0].timeSteps.enumerated() {
+        let timeSteps = scheduler[0].calculateTimesteps(strength: timestepStrength)
+        for (step,t) in timeSteps.enumerated() {
 
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
@@ -212,6 +244,35 @@ public struct StableDiffusionPipeline: ResourceManaging {
         let samples = (0..<count).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
+        }
+        return samples
+    }
+    
+    
+    /// For image2image -
+    /// - Parameters:
+    ///   - count: batch size
+    ///   - stdev: 1
+    ///   - seed: seed provided
+    ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
+    ///     but I have seen implementations of pipelines where it is the same.
+    /// - Returns: An array of tuples of noise values with length of batch size.
+    func generateImage2ImageLatentSamples(_ count: Int, stdev: Float, seed: Int, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
+        var sampleShape = unet.latentSampleShape
+        sampleShape[0] = 1
+
+        var random = NumPyRandomSource(seed: UInt32(truncatingIfNeeded: seed))
+        let samples = (0..<count).map { _ in
+            if diagonalAndLatentNoiseIsSame {
+                let noise = MLShapedArray<Float32>(
+                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
+                return (noise, noise)
+            } else {
+                return (MLShapedArray<Float32>(
+                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))),
+                        MLShapedArray<Float32>(
+                            converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))))
+            }
         }
         return samples
     }

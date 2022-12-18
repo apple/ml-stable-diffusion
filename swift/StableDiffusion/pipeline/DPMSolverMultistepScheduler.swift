@@ -23,11 +23,15 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     public let betas: [Float]
     public let alphas: [Float]
     public let alphasCumProd: [Float]
-    public let timeSteps: [Int]
+    private let timeSteps: [Int]
 
     public let alpha_t: [Float]
     public let sigma_t: [Float]
     public let lambda_t: [Float]
+    
+    public var allTimeSteps: [Int] {
+        timeSteps
+    }
     
     public let solverOrder = 2
     private(set) var lowerOrderStepped = 0

@@ -10,9 +10,12 @@ public protocol Scheduler {
 
     /// Number of inference steps to be performed
     var inferenceStepCount: Int { get }
+    
+    /// Training diffusion time steps index by inference time step
+    var allTimeSteps: [Int] { get }
 
     /// Training diffusion time steps index by inference time step
-    var timeSteps: [Int] { get }
+    func calculateTimesteps(strength: Float?) -> [Int]
 
     /// Schedule of betas which controls the amount of noise added at each timestep
     var betas: [Float] { get }
@@ -71,6 +74,35 @@ public extension Scheduler {
     }
 }
 
+// MARK: - Image2Image
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension Scheduler {
+    
+    func calculateAlphasCumprod(strength: Float) -> AlphasCumprodCalculation {
+        AlphasCumprodCalculation(
+            alphasCumprod: alphasCumProd,
+            timesteps: trainStepCount,
+            steps: inferenceStepCount,
+            strength: strength)
+    }
+}
+
+// MARK: - Timesteps
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension Scheduler {
+    
+    func calculateTimesteps(strength: Float?) -> [Int] {
+        guard let strength else { return allTimeSteps.reversed() }
+        let startStep = Int(Float(inferenceStepCount) * strength)
+        let acutalTimesteps = Array(allTimeSteps[0..<startStep].reversed())
+        return acutalTimesteps
+    }
+}
+
+// MARK: - BetaSchedule
+
 /// How to map a beta range to a sequence of betas to step over
 @available(iOS 16.2, macOS 13.1, *)
 public enum BetaSchedule {
@@ -80,6 +112,7 @@ public enum BetaSchedule {
     case scaledLinear
 }
 
+// MARK: - PNDMScheduler
 
 /// A scheduler used to compute a de-noised image
 ///
@@ -94,7 +127,11 @@ public final class PNDMScheduler: Scheduler {
     public let betas: [Float]
     public let alphas: [Float]
     public let alphasCumProd: [Float]
-    public let timeSteps: [Int]
+    private let timeSteps: [Int]
+    
+    public var allTimeSteps: [Int] {
+        timeSteps
+    }
 
     // Internal state
     var counter: Int
