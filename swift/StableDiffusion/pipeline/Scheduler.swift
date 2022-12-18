@@ -179,7 +179,7 @@ public final class PNDMScheduler: Scheduler {
         timeSteps.append(contentsOf: forwardSteps.dropLast(1))
         timeSteps.append(timeSteps.last!)
         timeSteps.append(forwardSteps.last!)
-        timeSteps.reverse()
+        // do no revers timeSteps, this is now done in `calculateTimesteps` function
 
         self.timeSteps = timeSteps
         self.counter = 0
