@@ -94,9 +94,6 @@ struct StableDiffusionSample: ParsableCommand {
         let startingImage: CGImage?
         if image != "none" {
             let imageURL = URL(filePath: image)
-//            if FileManager.default.fileExists(atPath: imageURL.path()) {
-//                throw RunError.resources("Starting image not found \(imageURL)")
-//            }
             do {
                 let imageData = try Data(contentsOf: imageURL)
                 guard
