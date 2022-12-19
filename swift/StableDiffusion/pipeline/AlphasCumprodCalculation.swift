@@ -22,7 +22,7 @@ public struct AlphasCumprodCalculation {
         strength: Float
     ) {
         let tEnc = Int(strength * Float(steps))
-        let initTimestep = timesteps - timesteps / steps * (steps - tEnc) + 1
+        let initTimestep = min(max(0, timesteps - timesteps / steps * (steps - tEnc) + 1), timesteps - 1)
         self.sqrtAlphasCumprod = alphasCumprod[initTimestep].squareRoot()
         self.sqrtOneMinusAlphasCumprod = (1 - alphasCumprod[initTimestep]).squareRoot()
     }
