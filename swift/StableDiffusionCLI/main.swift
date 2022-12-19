@@ -19,6 +19,9 @@ struct StableDiffusionSample: ParsableCommand {
     @Argument(help: "Input string prompt")
     var prompt: String
 
+    @Option(help: "Input string negative prompt")
+    var negativePrompt: String
+
     @Option(
         help: ArgumentHelp(
             "Path to stable diffusion resources.",
@@ -85,6 +88,7 @@ struct StableDiffusionSample: ParsableCommand {
 
         let images = try pipeline.generateImages(
             prompt: prompt,
+            negativePrompt: negativePrompt,
             imageCount: imageCount,
             stepCount: stepCount,
             seed: seed,
