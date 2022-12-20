@@ -19,6 +19,7 @@ setup(
         "torch",
         "transformers",
         "scipy",
+        "numpy<1.24",
     ],
     packages=find_packages(),
     classifiers=[
