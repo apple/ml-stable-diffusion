@@ -46,7 +46,7 @@ Python | macOS | Xcode | iPadOS, iOS |
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 
-There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs`, or select the variants you need. For example, to do generation in Python using the `original` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could do something like this:
+There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs`, or select the variants you need. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could do something like this:
 
 ```Python
 from huggingface_hub import snapshot_download
