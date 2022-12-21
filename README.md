@@ -46,7 +46,7 @@ Python | macOS | Xcode | iPadOS, iOS |
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 
-There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs`, or select the variants you need. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could do something like this:
+There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs`, or select just the variants you need. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could do something like this:
 
 ```Python
 from huggingface_hub import snapshot_download
@@ -57,9 +57,24 @@ variant = "original/packages"
 downloaded = snapshot_download(repo_id, allow_patterns=f"{variant}/*")
 ```
 
-`downloaded` would be the path in your local filesystem where the model checkpoint was saved.
+`downloaded` would be the path in your local filesystem where the model checkpoint was saved. Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details on this process.
 
-Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details on this process.
+
+If you prefer to use `git` to clone the repos with all the variants, you need to follow this process:
+
+First, install the `git lfs` extension for your system. `git lfs` stores large files outside the main git repo, and it downloads them from the appropriate server after you clone or checkout. It is available in most package managers, check [the installation page](https://git-lfs.com) for details.
+
+After `git lfs` is installed in your computer, you need to enable it by running the following shell command once:
+
+```bash
+git lfs install
+```
+
+Then you can use `git clone` to download a copy of the repo that includes all model variants. In order to download Stable Diffusion version 1.4, you'd issue the following command in your terminal:
+
+```bash
+git clone https://huggingface.co/apple/coreml-stable-diffusion-v1-4
+```
 
 </details>
 
