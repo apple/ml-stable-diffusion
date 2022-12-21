@@ -5,33 +5,63 @@ import Foundation
 import CoreML
 
 /// U-Net noise prediction model for stable diffusion
-public struct Unet {
+@available(iOS 16.2, macOS 13.1, *)
+public struct Unet: ResourceManaging {
 
     /// Model used to predict noise residuals given an input, diffusion time step, and conditional embedding
     ///
     /// It can be in the form of a single model or multiple stages
-    var models: [MLModel]
+    var models: [ManagedMLModel]
 
     /// Creates a U-Net noise prediction model
     ///
     /// - Parameters:
-    ///   - model: U-Net held in single Core ML model
-    /// - Returns: Ready for prediction
-    public init(model: MLModel) {
-        self.models = [model]
+    ///   - url: Location of single U-Net  compiled Core ML model
+    ///   - configuration: Configuration to be used when the model is loaded
+    /// - Returns: U-net model that will lazily load its required resources when needed or requested
+    public init(modelAt url: URL,
+                configuration: MLModelConfiguration) {
+        self.models = [ManagedMLModel(modelAt: url, configuration: configuration)]
     }
 
     /// Creates a U-Net noise prediction model
     ///
     /// - Parameters:
-    ///   - chunks: U-Net held chunked into multiple Core ML models
-    /// - Returns: Ready for prediction
-    public init(chunks: [MLModel]) {
-        self.models = chunks
+    ///   - urls: Location of chunked U-Net via urls to each compiled chunk
+    ///   - configuration: Configuration to be used when the model is loaded
+    /// - Returns: U-net model that will lazily load its required resources when needed or requested
+    public init(chunksAt urls: [URL],
+                configuration: MLModelConfiguration) {
+        self.models = urls.map { ManagedMLModel(modelAt: $0, configuration: configuration) }
+    }
+
+    /// Load resources.
+    public func loadResources() throws {
+        for model in models {
+            try model.loadResources()
+        }
+    }
+
+    /// Unload the underlying model to free up memory
+    public func unloadResources() {
+        for model in models {
+            model.unloadResources()
+        }
+    }
+
+    /// Pre-warm resources
+    public func prewarmResources() throws {
+        // Override default to pre-warm each model
+        for model in models {
+            try model.loadResources()
+            model.unloadResources()
+        }
     }
 
     var latentSampleDescription: MLFeatureDescription {
-        models.first!.modelDescription.inputDescriptionsByName["sample"]!
+        try! models.first!.perform { model in
+            model.modelDescription.inputDescriptionsByName["sample"]!
+        }
     }
 
     /// The expected shape of the models latent sample input
@@ -91,13 +121,10 @@ public struct Unet {
         return noise
     }
 
-    /// Prediction queue
-    let queue = DispatchQueue(label: "unet.predict")
-
     func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
 
-        var results = try queue.sync {
-            try models.first!.predictions(fromBatch: batch)
+        var results = try models.first!.perform { model in
+            try model.predictions(fromBatch: batch)
         }
 
         if models.count == 1 {
@@ -117,8 +144,8 @@ public struct Unet {
             let nextBatch = MLArrayBatchProvider(array: next)
 
             // Predict
-            results = try queue.sync {
-                try stage.predictions(fromBatch: nextBatch)
+            results = try stage.perform { model in
+                try model.predictions(fromBatch: nextBatch)
             }
         }
 

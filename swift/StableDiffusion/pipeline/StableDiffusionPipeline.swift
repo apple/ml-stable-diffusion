@@ -6,11 +6,20 @@ import CoreML
 import Accelerate
 import CoreGraphics
 
+/// Schedulers compatible with StableDiffusionPipeline
+public enum StableDiffusionScheduler {
+    /// Scheduler that uses a pseudo-linear multi-step (PLMS) method
+    case pndmScheduler
+    /// Scheduler that uses a second order DPM-Solver++ algorithm
+    case dpmSolverMultistepScheduler
+}
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
-public struct StableDiffusionPipeline {
+@available(iOS 16.2, macOS 13.1, *)
+public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Model to generate embeddings for tokenized input text
     var textEncoder: TextEncoder
@@ -32,6 +41,14 @@ public struct StableDiffusionPipeline {
         safetyChecker != nil
     }
 
+    /// Option to reduce memory during image generation
+    ///
+    /// If true, the pipeline will lazily load TextEncoder, Unet, Decoder, and SafetyChecker
+    /// when needed and aggressively unload their resources after
+    ///
+    /// This will increase latency in favor of reducing memory
+    var reduceMemory: Bool = false
+
     /// Creates a pipeline using the specified models and tokenizer
     ///
     /// - Parameters:
@@ -40,23 +57,58 @@ public struct StableDiffusionPipeline {
     ///   - decoder: Model for decoding latent sample to image
     ///   - safetyChecker: Optional model for checking safety of generated images
     ///   - guidanceScale: Influence of the text prompt on generation process
+    ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
     public init(textEncoder: TextEncoder,
                 unet: Unet,
                 decoder: Decoder,
                 safetyChecker: SafetyChecker? = nil,
-                guidanceScale: Float = 7.5) {
+                guidanceScale: Float = 7.5,
+                reduceMemory: Bool = false) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
         self.safetyChecker = safetyChecker
         self.guidanceScale = guidanceScale
+        self.reduceMemory = reduceMemory
+    }
+
+    /// Load required resources for this pipeline
+    ///
+    /// If reducedMemory is true this will instead call prewarmResources instead
+    /// and let the pipeline lazily load resources as needed
+    public func loadResources() throws {
+        if reduceMemory {
+            try prewarmResources()
+        } else {
+            try textEncoder.loadResources()
+            try unet.loadResources()
+            try decoder.loadResources()
+            try safetyChecker?.loadResources()
+        }
+    }
+
+    /// Unload the underlying resources to free up memory
+    public func unloadResources() {
+        textEncoder.unloadResources()
+        unet.unloadResources()
+        decoder.unloadResources()
+        safetyChecker?.unloadResources()
+    }
+
+    // Prewarm resources one at a time
+    public func prewarmResources() throws {
+        try textEncoder.prewarmResources()
+        try unet.prewarmResources()
+        try decoder.prewarmResources()
+        try safetyChecker?.prewarmResources()
     }
 
     /// Text to image generation using stable diffusion
     ///
     /// - Parameters:
     ///   - prompt: Text prompt to guide sampling
+    ///   - negativePrompt: Negative text prompt to guide sampling
     ///   - stepCount: Number of inference steps to perform
     ///   - imageCount: Number of samples/images to generate for the input prompt
     ///   - seed: Random seed which
@@ -66,27 +118,39 @@ public struct StableDiffusionPipeline {
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
         prompt: String,
+        negativePrompt: String = "",
         imageCount: Int = 1,
         stepCount: Int = 50,
-        seed: Int = 0,
+        seed: UInt32 = 0,
         disableSafety: Bool = false,
+        scheduler: StableDiffusionScheduler = .pndmScheduler,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
-        // Encode the input prompt as well as a blank unconditioned input
+        // Encode the input prompt and negative prompt
         let promptEmbedding = try textEncoder.encode(prompt)
-        let blankEmbedding = try textEncoder.encode("")
+        let negativePromptEmbedding = try textEncoder.encode(negativePrompt)
+
+        if reduceMemory {
+            textEncoder.unloadResources()
+        }
 
         // Convert to Unet hidden state representation
+        // Concatenate the prompt and negative prompt embeddings
         let concatEmbedding = MLShapedArray<Float32>(
-            concatenating: [blankEmbedding, promptEmbedding],
+            concatenating: [negativePromptEmbedding, promptEmbedding],
             alongAxis: 0
         )
 
         let hiddenStates = toHiddenStates(concatEmbedding)
 
         /// Setup schedulers
-        let scheduler = (0..<imageCount).map { _ in Scheduler(stepCount: stepCount) }
+        let scheduler: [Scheduler] = (0..<imageCount).map { _ in
+            switch scheduler {
+            case .pndmScheduler: return PNDMScheduler(stepCount: stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: stepCount)
+            }
+        }
         let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
@@ -136,15 +200,19 @@ public struct StableDiffusionPipeline {
             }
         }
 
+        if reduceMemory {
+            unet.unloadResources()
+        }
+
         // Decode the latent samples to images
         return try decodeToImages(latents, disableSafety: disableSafety)
     }
 
-    func generateLatentSamples(_ count: Int, stdev: Float, seed: Int) -> [MLShapedArray<Float32>] {
+    func generateLatentSamples(_ count: Int, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
 
-        var random = NumPyRandomSource(seed: UInt32(seed))
+        var random = NumPyRandomSource(seed: seed)
         let samples = (0..<count).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
@@ -192,8 +260,10 @@ public struct StableDiffusionPipeline {
     func decodeToImages(_ latents: [MLShapedArray<Float32>],
                         disableSafety: Bool) throws -> [CGImage?] {
 
-
         let images = try decoder.decode(latents)
+        if reduceMemory {
+            decoder.unloadResources()
+        }
 
         // If safety is disabled return what was decoded
         if disableSafety {
@@ -210,11 +280,16 @@ public struct StableDiffusionPipeline {
             try safetyChecker.isSafe(image) ? image : nil
         }
 
+        if reduceMemory {
+            safetyChecker.unloadResources()
+        }
+
         return safeImages
     }
 
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 extension StableDiffusionPipeline {
     /// Sampling progress details
     public struct Progress {

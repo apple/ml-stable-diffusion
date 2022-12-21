@@ -8,6 +8,7 @@ import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
 
+@available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
 
     static let configuration = CommandConfiguration(
@@ -17,6 +18,9 @@ struct StableDiffusionSample: ParsableCommand {
 
     @Argument(help: "Input string prompt")
     var prompt: String
+
+    @Option(help: "Input string negative prompt")
+    var negativePrompt: String
 
     @Option(
         help: ArgumentHelp(
@@ -47,13 +51,19 @@ struct StableDiffusionSample: ParsableCommand {
     var outputPath: String = "./"
 
     @Option(help: "Random seed")
-    var seed: Int = 93
+    var seed: UInt32 = 93
 
     @Option(help: "Compute units to load model with {all,cpuOnly,cpuAndGPU,cpuAndNeuralEngine}")
     var computeUnits: ComputeUnits = .all
 
+    @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
+    var scheduler: SchedulerOption = .pndm
+
     @Flag(help: "Disable safety checking")
     var disableSafety: Bool = false
+
+    @Flag(help: "Reduce memory usage")
+    var reduceMemory: Bool = false
 
     mutating func run() throws {
         guard FileManager.default.fileExists(atPath: resourcePath) else {
@@ -68,7 +78,9 @@ struct StableDiffusionSample: ParsableCommand {
         log("(Note: This can take a while the first time using these resources)\n")
         let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL,
                                                    configuration: config,
-                                                   disableSafety: disableSafety)
+                                                   disableSafety: disableSafety,
+                                                   reduceMemory: reduceMemory)
+        try pipeline.loadResources()
 
         log("Sampling ...\n")
         let sampleTimer = SampleTimer()
@@ -76,9 +88,11 @@ struct StableDiffusionSample: ParsableCommand {
 
         let images = try pipeline.generateImages(
             prompt: prompt,
+            negativePrompt: negativePrompt,
             imageCount: imageCount,
             stepCount: stepCount,
-            seed: seed
+            seed: seed,
+            scheduler: scheduler.stableDiffusionScheduler
         ) { progress in
             sampleTimer.stop()
             handleProgress(progress,sampleTimer)
@@ -145,7 +159,8 @@ struct StableDiffusionSample: ParsableCommand {
     }
 
     func imageName(_ sample: Int, step: Int? = nil) -> String {
-        var name = prompt.replacingOccurrences(of: " ", with: "_")
+        let fileCharLimit = 75
+        var name = prompt.prefix(fileCharLimit).replacingOccurrences(of: " ", with: "_")
         if imageCount != 1 {
             name += ".\(sample)"
         }
@@ -171,6 +186,7 @@ enum RunError: Error {
     case saving(String)
 }
 
+@available(iOS 16.2, macOS 13.1, *)
 enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     case all, cpuAndGPU, cpuOnly, cpuAndNeuralEngine
     var asMLComputeUnits: MLComputeUnits {
@@ -183,4 +199,19 @@ enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
     }
 }
 
-StableDiffusionSample.main()
+@available(iOS 16.2, macOS 13.1, *)
+enum SchedulerOption: String, ExpressibleByArgument {
+    case pndm, dpmpp
+    var stableDiffusionScheduler: StableDiffusionScheduler {
+        switch self {
+        case .pndm: return .pndmScheduler
+        case .dpmpp: return .dpmSolverMultistepScheduler
+        }
+    }
+}
+
+if #available(iOS 16.2, macOS 13.1, *) {
+    StableDiffusionSample.main()
+} else {
+    print("Unsupported OS")
+}
