@@ -76,20 +76,22 @@ model_path = download_model(repo_id, variant, output_dir="./models")
 print(f"Model downloaded at {model_path}")
 ```
 
-`model_path` would be the path in your local filesystem where the checkpoint was saved. Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details on this process.
+`model_path` would be the path in your local filesystem where the checkpoint was saved. Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details.
 
 
 If you prefer to use `git` to clone the repos with all the variants, you need to follow this process:
 
-First, install the `git lfs` extension for your system. `git lfs` stores large files outside the main git repo, and it downloads them from the appropriate server after you clone or checkout. It is available in most package managers, check [the installation page](https://git-lfs.com) for details.
+**Step 1:** Install the `git lfs` extension for your system.
 
-After `git lfs` is installed in your computer, you need to enable it by running the following shell command once:
+`git lfs` stores large files outside the main git repo, and it downloads them from the appropriate server after you clone or checkout. It is available in most package managers, check [the installation page](https://git-lfs.com) for details.
+
+**Step 2:** Enable `git lfs` by running this command once:
 
 ```bash
 git lfs install
 ```
 
-Then you can use `git clone` to download a copy of the repo that includes all model variants. In order to download Stable Diffusion version 1.4, you'd issue the following command in your terminal:
+**Step 3:** Use `git clone` to download a copy of the repo that includes all model variants. For Stable Diffusion version 1.4, you'd issue the following command in your terminal:
 
 ```bash
 git clone https://huggingface.co/apple/coreml-stable-diffusion-v1-4
