@@ -97,6 +97,14 @@ git clone https://huggingface.co/apple/coreml-stable-diffusion-v1-4
 
 </details>
 
+## <a name="demo-app"></a> Native Swift Demo App
+
+<details>
+  <summary> Click to expand </summary>
+
+🤗 Hugging Face created an [open-source demo app](https://github.com/huggingface/swift-coreml-diffusers) on top of this library. It's written in native Swift and Swift UI, and runs on macOS, iOS and iPadOS. You can use the code to see how to integrate this library in your own projects.
+
+</details>
 
 ## <a name="converting-models-to-coreml"></a> Converting Models to Core ML
 
