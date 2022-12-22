@@ -33,6 +33,73 @@ Python | macOS | Xcode | iPadOS, iOS |
 :------:|:------:|:------:|:------:|
 3.8 | 13.1 | 14.2 | 16.2 |
 
+## <a name="using-converted-weights"></a> Using Ready-made Core ML Models from Hugging Face Hub
+
+<details>
+  <summary> Click to expand </summary>
+
+🤗 Hugging Face ran the [conversion procedure](#converting-models-to-coreml) on the following models and made the Core ML weights publicly available on the Hub. If you would like to convert a version of Stable Diffusion that is not already available on the Hub, please refer to the [Converting Models to Core ML](#converting-models-to-core-ml).
+
+* [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
+* [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5)
+* [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
+
+If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
+
+There are several variants in each model repository. You may clone the whole repos using `git` and `git lfs` to download all variants, or selectively download the ones you need.
+
+To clone the repos using `git`, please follow this process:
+
+**Step 1:** Install the `git lfs` extension for your system.
+
+`git lfs` stores large files outside the main git repo, and it downloads them from the appropriate server after you clone or checkout. It is available in most package managers, check [the installation page](https://git-lfs.com) for details.
+
+**Step 2:** Enable `git lfs` by running this command once:
+
+```bash
+git lfs install
+```
+
+**Step 3:** Use `git clone` to download a copy of the repo that includes all model variants. For Stable Diffusion version 1.4, you'd issue the following command in your terminal:
+
+```bash
+git clone https://huggingface.co/apple/coreml-stable-diffusion-v1-4
+```
+
+If you prefer to download specific variants instead of cloning the repos, you can use the `huggingface_hub` Python library. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could use the following helper code:
+
+```Python
+from huggingface_hub import snapshot_download
+from huggingface_hub.file_download import repo_folder_name
+from pathlib import Path
+import shutil
+
+repo_id = "apple/coreml-stable-diffusion-v1-4"
+variant = "original/packages"
+
+def download_model(repo_id, variant, output_dir):
+    destination = Path(output_dir) / (repo_id.split("/")[-1] + "_" + variant.replace("/", "_"))
+    if destination.exists():
+        raise Exception(f"Model already exists at {destination}")
+    
+    # Download and copy without symlinks
+    downloaded = snapshot_download(repo_id, allow_patterns=f"{variant}/*", cache_dir=output_dir)
+    downloaded_bundle = Path(downloaded) / variant
+    shutil.copytree(downloaded_bundle, destination)
+
+    # Remove all downloaded files
+    cache_folder = Path(output_dir) / repo_folder_name(repo_id=repo_id, repo_type="model")
+    shutil.rmtree(cache_folder)
+    return destination
+
+model_path = download_model(repo_id, variant, output_dir="./models")
+print(f"Model downloaded at {model_path}")
+```
+
+`model_path` would be the path in your local filesystem where the checkpoint was saved. Please, refer to [this post](https://huggingface.co/blog/diffusers-coreml) for additional details.
+
+</details>
+
 ## <a name="converting-models-to-coreml"></a> Converting Models to Core ML
 
 <details>
@@ -158,6 +225,15 @@ Optionally, it may also include the safety checker model that some versions of S
 - `SafetyChecker.mlmodelc`
 
 Note that the chunked version of Unet is checked for first. Only if it is not present will the full `Unet.mlmodelc` be loaded. Chunking is required for iOS and iPadOS and not necessary for macOS.
+
+</details>
+
+## <a name="swift-app"></a> Example Swift App
+
+<details>
+  <summary> Click to expand </summary>
+
+🤗 Hugging Face created an [open-source demo app](https://github.com/huggingface/swift-coreml-diffusers) on top of this library. It's written in native Swift and Swift UI, and runs on macOS, iOS and iPadOS. You can use the code as a starting point for your app, or to see how to integrate this library in your own projects.
 
 </details>
 
