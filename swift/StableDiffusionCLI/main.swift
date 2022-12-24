@@ -53,6 +53,9 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Random seed")
     var seed: UInt32 = 93
 
+    @Option(help: "Controls the influence of the text prompt on sampling process (0=random images)")
+    var guidanceScale: Float = 7.5
+
     @Option(help: "Compute units to load model with {all,cpuOnly,cpuAndGPU,cpuAndNeuralEngine}")
     var computeUnits: ComputeUnits = .all
 
@@ -92,6 +95,7 @@ struct StableDiffusionSample: ParsableCommand {
             imageCount: imageCount,
             stepCount: stepCount,
             seed: seed,
+            guidanceScale: guidanceScale,
             scheduler: scheduler.stableDiffusionScheduler
         ) { progress in
             sampleTimer.stop()
