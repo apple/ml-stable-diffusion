@@ -55,13 +55,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - safetyChecker: Optional model for checking safety of generated images
     ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
-    public init(
-        textEncoder: TextEncoder,
-        unet: Unet,
-        decoder: Decoder,
-        safetyChecker: SafetyChecker? = nil,
-        reduceMemory: Bool = false
-    ) {
+    public init(textEncoder: TextEncoder,
+                unet: Unet,
+                decoder: Decoder,
+                safetyChecker: SafetyChecker? = nil,
+                reduceMemory: Bool = false) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
