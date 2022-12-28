@@ -178,10 +178,5 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         }
         
         return prevSample
-    }
-    
-    /// This scheduler does not support image2image strength value.
-    public func calculateTimesteps(strength: Float?) -> [Int] {
-        timeSteps
-    }
+    }    
 }
