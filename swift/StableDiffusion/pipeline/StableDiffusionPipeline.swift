@@ -219,7 +219,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 pipeline: self,
                 prompt: prompt,
                 step: step,
-                stepCount: stepCount,
+                stepCount: timeSteps.count,
                 currentLatentSamples: latents,
                 isSafetyEnabled: canSafetyCheck && !disableSafety
             )
