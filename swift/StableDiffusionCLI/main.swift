@@ -20,7 +20,7 @@ struct StableDiffusionSample: ParsableCommand {
     var prompt: String
 
     @Option(help: "Input string negative prompt")
-    var negativePrompt: String
+    var negativePrompt: String = ""
 
     @Option(
         help: ArgumentHelp(
