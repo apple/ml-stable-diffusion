@@ -92,12 +92,11 @@ public extension Scheduler {
 
 @available(iOS 16.2, macOS 13.1, *)
 public extension Scheduler {
-    
     func calculateTimesteps(strength: Float?) -> [Int] {
-        guard let strength else { return timeSteps.reversed() }
-        let startStep = Int(Float(inferenceStepCount) * strength)
-        let acutalTimesteps = Array(timeSteps[0..<startStep].reversed())
-        return acutalTimesteps
+        guard let strength else { return timeSteps }
+        let startStep = max(inferenceStepCount - Int(Float(inferenceStepCount) * strength), 0)
+        let actualTimesteps = Array(timeSteps[startStep...])
+        return actualTimesteps
     }
 }
 
@@ -175,7 +174,7 @@ public final class PNDMScheduler: Scheduler {
         timeSteps.append(contentsOf: forwardSteps.dropLast(1))
         timeSteps.append(timeSteps.last!)
         timeSteps.append(forwardSteps.last!)
-        // do no revers timeSteps, this is now done in `calculateTimesteps` function
+        timeSteps.reverse()
 
         self.timeSteps = timeSteps
         self.counter = 0
