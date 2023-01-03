@@ -480,6 +480,7 @@ def main(args):
         height=coreml_pipe.height,
         width=coreml_pipe.width,
         num_inference_steps=args.num_inference_steps,
+        guidance_scale=args.guidance_scale
     )
 
     out_path = get_image_path(args)
@@ -529,6 +530,11 @@ if __name__ == "__main__":
         default=50,
         type=int,
         help="The number of iterations the unet model will be executed throughout the reverse diffusion process")
+    parser.add_argument(
+        "--guidance-scale",
+        default=7.5,
+        type=float,
+        help="Controls the influence of the text prompt on sampling process (0=random images)")
 
     args = parser.parse_args()
     main(args)
