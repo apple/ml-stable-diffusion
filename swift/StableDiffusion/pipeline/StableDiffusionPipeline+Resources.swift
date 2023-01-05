@@ -14,6 +14,7 @@ public extension StableDiffusionPipeline {
         public let unetChunk1URL: URL
         public let unetChunk2URL: URL
         public let decoderURL: URL
+        public let encoderURL: URL
         public let safetyCheckerURL: URL
         public let vocabURL: URL
         public let mergesURL: URL
@@ -24,6 +25,7 @@ public extension StableDiffusionPipeline {
             unetChunk1URL = baseURL.appending(path: "UnetChunk1.mlmodelc")
             unetChunk2URL = baseURL.appending(path: "UnetChunk2.mlmodelc")
             decoderURL = baseURL.appending(path: "VAEDecoder.mlmodelc")
+            encoderURL = baseURL.appending(path: "VAEEncoder.mlmodelc")
             safetyCheckerURL = baseURL.appending(path: "SafetyChecker.mlmodelc")
             vocabURL = baseURL.appending(path: "vocab.json")
             mergesURL = baseURL.appending(path: "merges.txt")
@@ -74,11 +76,22 @@ public extension StableDiffusionPipeline {
             FileManager.default.fileExists(atPath: urls.safetyCheckerURL.path) {
             safetyChecker = SafetyChecker(modelAt: urls.safetyCheckerURL, configuration: config)
         }
+        
+        // Optional Image Encoder
+        let encoder: Encoder?
+        if
+            let encoderModel = try? MLModel(contentsOf: urls.encoderURL, configuration: config)
+        {
+            encoder = Encoder(model: encoderModel)
+        } else {
+            encoder = nil
+        }
 
         // Construct pipeline
         self.init(textEncoder: textEncoder,
                   unet: unet,
                   decoder: decoder,
+                  encoder: encoder,
                   safetyChecker: safetyChecker,
                   reduceMemory: reduceMemory)
     }

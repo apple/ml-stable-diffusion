@@ -3,7 +3,6 @@
 
 import Foundation
 import CoreML
-import Accelerate
 
 /// A decoder model which produces RGB images from latent samples
 @available(iOS 16.2, macOS 13.1, *)
@@ -57,12 +56,11 @@ public struct Decoder: ResourceManaging {
         }
 
         // Transform the outputs to CGImages
-        let images: [CGImage] = (0..<results.count).map { i in
+        let images: [CGImage] = try (0..<results.count).map { i in
             let result = results.features(at: i)
             let outputName = result.featureNames.first!
             let output = result.featureValue(for: outputName)!.multiArrayValue!
-
-            return toRGBCGImage(MLShapedArray<Float32>(output))
+            return try CGImage.fromShapedArray(MLShapedArray<Float32>(output))
         }
 
         return images
@@ -74,50 +72,4 @@ public struct Decoder: ResourceManaging {
         }
     }
 
-    typealias PixelBufferPFx1 = vImage.PixelBuffer<vImage.PlanarF>
-    typealias PixelBufferP8x3 = vImage.PixelBuffer<vImage.Planar8x3>
-    typealias PixelBufferIFx3 = vImage.PixelBuffer<vImage.InterleavedFx3>
-    typealias PixelBufferI8x3 = vImage.PixelBuffer<vImage.Interleaved8x3>
-
-    func toRGBCGImage(_ array: MLShapedArray<Float32>) -> CGImage {
-
-        // array is [N,C,H,W], where C==3
-        let channelCount = array.shape[1]
-        assert(channelCount == 3,
-               "Decoding model output has \(channelCount) channels, expected 3")
-        let height = array.shape[2]
-        let width = array.shape[3]
-
-        // Normalize each channel into a float between 0 and 1.0
-        let floatChannels = (0..<channelCount).map { i in
-
-            // Normalized channel output
-            let cOut = PixelBufferPFx1(width: width, height:height)
-
-            // Reference this channel in the array and normalize
-            array[0][i].withUnsafeShapedBufferPointer { ptr, _, strides in
-                let cIn = PixelBufferPFx1(data: .init(mutating: ptr.baseAddress!),
-                                          width: width, height: height,
-                                          byteCountPerRow: strides[0]*4)
-                // Map [-1.0 1.0] -> [0.0 1.0]
-                cIn.multiply(by: 0.5, preBias: 1.0, postBias: 0.0, destination: cOut)
-            }
-            return cOut
-        }
-
-        // Convert to interleaved and then to UInt8
-        let floatImage = PixelBufferIFx3(planarBuffers: floatChannels)
-        let uint8Image = PixelBufferI8x3(width: width, height: height)
-        floatImage.convert(to:uint8Image) // maps [0.0 1.0] -> [0 255] and clips
-
-        // Convert to uint8x3 to RGB CGImage (no alpha)
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
-        let cgImage = uint8Image.makeCGImage(cgImageFormat:
-                .init(bitsPerComponent: 8,
-                      bitsPerPixel: 3*8,
-                      colorSpace: CGColorSpaceCreateDeviceRGB(),
-                      bitmapInfo: bitmapInfo)!)!
-
-        return cgImage
-    }
 }
