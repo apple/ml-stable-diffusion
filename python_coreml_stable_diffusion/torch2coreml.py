@@ -10,7 +10,6 @@ from collections import OrderedDict, defaultdict
 from copy import deepcopy
 import coremltools as ct
 from diffusers import StableDiffusionPipeline
-from diffusers.models.vae import DiagonalGaussianDistribution
 import gc
 
 import logging
@@ -30,21 +29,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-#from coremltools.converters.mil.frontend.torch.torch_op_registry import register_torch_op
-#from coremltools.converters.mil.frontend.torch.ops import _get_inputs
-#from coremltools.converters.mil import Builder as mb
-#
-#@register_torch_op
-#def randn(context, node):
-#    inputs = _get_inputs(context, node, expected=5)
-#    shape = inputs[0]
-#
-#    x = mb.random_normal(shape=shape, mean=0., stddev=1.)
-#    context.add(x, node.name)
-
 torch.set_grad_enabled(False)
 
 from types import MethodType
+
 
 def _get_coreml_inputs(sample_inputs, args):
     return [
@@ -546,7 +534,6 @@ def convert_vae_encoder(pipe, args):
             h = self.encoder(sample)
             moments = self.quant_conv(h)
             diagonalNoise = diagonalNoise.to(sample.device)
-#            posterior = DiagonalGaussianDistribution(moments)
             posterior = CoreMLDiagonalGaussianDistribution(moments, diagonalNoise)
             posteriorSample = posterior.sample()
             
