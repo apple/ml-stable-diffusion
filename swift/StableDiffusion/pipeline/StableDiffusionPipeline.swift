@@ -258,7 +258,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
     ///     but I have seen implementations of pipelines where it is the same.
     /// - Returns: An array of tuples of noise values with length of batch size.
-    func generateImage2ImageLatentSamples(_ count: Int, stdev: Float, seed: Int, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
+    func generateImage2ImageLatentSamples(_ count: Int, stdev: Float, seed: UInt32, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
 
