@@ -142,3 +142,7 @@ dmypy.json
 
 # macOS filesystem
 *.DS_Store
+
+# Added
+models/
+output_images/
