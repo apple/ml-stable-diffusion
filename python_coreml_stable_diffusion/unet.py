@@ -6,7 +6,7 @@
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.modeling_utils import ModelMixin
+from diffusers import ModelMixin
 
 from enum import Enum
 
