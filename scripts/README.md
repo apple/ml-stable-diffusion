@@ -2,17 +2,21 @@
 
 ## Download models
 
-Modify `scripts/download_model.py` and run it: `python scripts/download_model.py`
+Modify `scripts/download_model.py` to choose the model you'd like to download.
+Then run it from the command line: `python scripts/download_model.py`
+
+Check the `models/<output>` folder to see the model. If it is a https://huggingface.co/coreml model (models converted to Core ML), then unzip it first.
 
 ## Run inference
 
 ```shell
-MODEL=coreml-stable-diffusion-2-1-base_original
-# MODEL=coreml-stable-diffusion-v1-5_original_compiled
 # MODEL=coreml-stable-diffusion-v1-4_original_compiled
-OUTPUT_PATH=output_images/$MODEL
+# MODEL=coreml-stable-diffusion-v1-5_original_compiled
+MODEL=coreml-stable-diffusion-2-1-base_original
+# MODEL=coreml-stable-diffusion-2-1-base_split_einsum
 # COMPUTE_UNITS=all # "split_einsum" models
 COMPUTE_UNITS=cpuAndGPU # on "original" models
+OUTPUT_PATH=output_images/$MODEL
 mkdir -p $OUTPUT_PATH
 
 PROMPT="a photograph of an astronaut riding on a horse"
