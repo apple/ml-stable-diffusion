@@ -1,5 +1,5 @@
 coremltools
 diffusers[torch]
-torch
+torch == 1.12.1
 transformers
 scipy

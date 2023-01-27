@@ -16,7 +16,7 @@ setup(
     install_requires=[
         "coremltools>=6.1",
         "diffusers[torch]",
-        "torch",
+        "torch==1.12.1",
         "transformers",
         "scipy",
         "numpy<1.24",
