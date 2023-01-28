@@ -121,7 +121,7 @@ pip install -e .
 **Step 4:** Execute the following command from the Terminal to generate Core ML model files (`.mlpackage`)
 
 ```shell
-python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-text-encoder --convert-vae-decoder --convert-safety-checker -o <output-mlpackages-directory>
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-text-encoder --convert-vae-decoder  --convert-vae-encoder --convert-safety-checker -o <output-mlpackages-directory>
 ```
 
 **WARNING:** This command will download several GB worth of PyTorch checkpoints from Hugging Face. Please ensure that you are on Wi-Fi and have enough disk space.
@@ -219,6 +219,10 @@ Both of these products require the Core ML models and tokenization resources to 
 - `VAEDecoder.mlmodelc` (image decoder model)
 - `vocab.json` (tokenizer vocabulary file)
 - `merges.text` (merges for byte pair encoding file)
+
+Optionally, for image2image, in-painting, or similar:
+
+- `VAEEnecoder.mlmodelc` (image encoder model) 
 
 Optionally, it may also include the safety checker model that some versions of Stable Diffusion include:
 
@@ -321,6 +325,7 @@ Differences may be less or more pronounced for different inputs. Please see the 
 <b> A3: </b>  In order to minimize the memory impact of the model conversion process, please execute the following command instead:
 
 ```bash
+python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-encoder -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-decoder -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-unet -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder -o <output-mlpackages-directory> && \
