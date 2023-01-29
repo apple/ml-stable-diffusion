@@ -508,7 +508,7 @@ if __name__ == "__main__":
                         help="Random seed to be able to reproduce results")
     parser.add_argument(
         "--model-version",
-        default="CompVis/stable-diffusion-v1-4",
+        default="stabilityai/stable-diffusion-2-base",
         help=
         ("The pre-trained model checkpoint and configuration to restore. "
          "For available versions: https://huggingface.co/models?search=stable-diffusion"
