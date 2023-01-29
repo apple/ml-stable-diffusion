@@ -4,6 +4,7 @@
 #
 
 import argparse
+import random
 
 from diffusers.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
@@ -503,7 +504,7 @@ if __name__ == "__main__":
     parser.add_argument("-o", required=True)
     parser.add_argument("--seed",
                         "-s",
-                        default=93,
+                        default=random.randint(1, 100000),
                         type=int,
                         help="Random seed to be able to reproduce results")
     parser.add_argument(
