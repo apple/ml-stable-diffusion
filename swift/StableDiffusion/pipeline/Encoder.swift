@@ -4,9 +4,9 @@
 import Foundation
 import CoreML
 
-@available(iOS 16.0, macOS 13.0, *)
+@available(iOS 16.0, macOS 13.1, *)
 /// Encoder, currently supports image2image
-public struct Encoder {
+public struct Encoder: ResourceManaging {
     
     public enum Error: String, Swift.Error {
         case latentOutputNotValid
@@ -14,14 +14,26 @@ public struct Encoder {
     }
     
     /// VAE encoder model + post math and adding noise from schedular
-    var model: MLModel
+    var model: ManagedMLModel
     
-    /// Create decoder from Core ML model
+    /// Create encoder from Core ML model
     ///
-    /// - Parameters
-    ///     - model: Core ML model for VAE decoder
-    public init(model: MLModel) {
-        self.model = model
+    /// - Parameters:
+    ///     - url: Location of compiled VAE encoder Core ML model
+    ///     - configuration: configuration to be used when the model is loaded
+    /// - Returns: An encoder that will lazily load its required resources when needed or requested
+    public init(modelAt url: URL, configuration: MLModelConfiguration) {
+        self.model = ManagedMLModel(modelAt: url, configuration: configuration)
+    }
+    
+    /// Ensure the model has been loaded into memory
+    public func loadResources() throws {
+        try model.loadResources()
+    }
+
+    /// Unload the underlying model to free up memory
+    public func unloadResources() {
+       model.unloadResources()
     }
     
     /// Prediction queue
@@ -46,17 +58,22 @@ public struct Encoder {
         
         let dict: [String: Any] = [
             "sample": MLMultiArray(sample),
-            "diagonalNoise": MLMultiArray(diagonalNoise),
+            "diagonal_noise": MLMultiArray(diagonalNoise),
             "noise": MLMultiArray(noise),
-            "sqrtAlphasCumprod": MLMultiArray(sqrtAlphasCumprod),
-            "sqrtOneMinusAlphasCumprod": MLMultiArray(sqrtOneMinusAlphasCumprod),
+            "sqrt_alphas_cumprod": MLMultiArray(sqrtAlphasCumprod),
+            "sqrt_one_minus_alphas_cumprod": MLMultiArray(sqrtOneMinusAlphasCumprod),
         ]
         let featureProvider = try MLDictionaryFeatureProvider(dictionary: dict)
         
         let batch = MLArrayBatchProvider(array: [featureProvider])
 
         // Batch predict with model
-        let results = try queue.sync { try model.predictions(fromBatch: batch) }
+        
+        let results = try queue.sync {
+            try model.perform { model in
+                try model.predictions(fromBatch: batch)
+            }
+        }
         
         let batchLatents: [MLShapedArray<Float32>] = try (0..<results.count).compactMap { i in
             let result = results.features(at: i)

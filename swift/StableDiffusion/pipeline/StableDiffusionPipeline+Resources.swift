@@ -79,10 +79,8 @@ public extension StableDiffusionPipeline {
         
         // Optional Image Encoder
         let encoder: Encoder?
-        if
-            let encoderModel = try? MLModel(contentsOf: urls.encoderURL, configuration: config)
-        {
-            encoder = Encoder(model: encoderModel)
+        if FileManager.default.fileExists(atPath: urls.encoderURL.path) {
+            encoder = Encoder(modelAt: urls.encoderURL, configuration: config)
         } else {
             encoder = nil
         }

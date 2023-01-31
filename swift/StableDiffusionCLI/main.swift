@@ -34,7 +34,7 @@ struct StableDiffusionSample: ParsableCommand {
     var resourcePath: String = "./"
     
     @Option(help: "Path to starting image.")
-    var image: String = "none"
+    var image: String? = nil
     
     @Option(help: "Strength for image2image.")
     var strength: Float = 0.5
@@ -92,7 +92,7 @@ struct StableDiffusionSample: ParsableCommand {
         try pipeline.loadResources()
         
         let startingImage: CGImage?
-        if image != "none" {
+        if let image {
             let imageURL = URL(filePath: image)
             do {
                 let imageData = try Data(contentsOf: imageURL)

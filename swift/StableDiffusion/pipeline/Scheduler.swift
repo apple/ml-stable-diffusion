@@ -10,7 +10,7 @@ public protocol Scheduler {
 
     /// Number of inference steps to be performed
     var inferenceStepCount: Int { get }
-    
+
     /// Training diffusion time steps index by inference time step
     var timeSteps: [Int] { get }
 
