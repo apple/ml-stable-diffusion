@@ -220,6 +220,10 @@ Both of these products require the Core ML models and tokenization resources to 
 - `vocab.json` (tokenizer vocabulary file)
 - `merges.text` (merges for byte pair encoding file)
 
+Optionally, for image2image, in-painting, or similar:
+
+- `VAEEncoder.mlmodelc` (image encoder model) 
+
 Optionally, it may also include the safety checker model that some versions of Stable Diffusion include:
 
 - `SafetyChecker.mlmodelc`
@@ -321,6 +325,7 @@ Differences may be less or more pronounced for different inputs. Please see the 
 <b> A3: </b>  In order to minimize the memory impact of the model conversion process, please execute the following command instead:
 
 ```bash
+python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-encoder -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-decoder -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-unet -o <output-mlpackages-directory> && \
 python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder -o <output-mlpackages-directory> && \
