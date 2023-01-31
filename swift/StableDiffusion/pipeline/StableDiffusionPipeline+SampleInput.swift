@@ -1,9 +1,5 @@
-//
-//  File.swift
-//  
-//
-//  Created by Timothy Kautz on 1/30/23.
-//
+// For licensing see accompanying LICENSE.md file.
+// Copyright (C) 2022 Apple Inc. All Rights Reserved.
 
 import Foundation
 import CoreGraphics
@@ -19,7 +15,7 @@ extension StableDiffusionPipeline {
     }
     
     /// Image generation configuration
-    public struct SampleInput: Hashable {
+    public struct Configuration: Hashable {
         
         /// Text prompt to guide sampling
         public var prompt: String
@@ -54,27 +50,9 @@ extension StableDiffusionPipeline {
         }
         
         public init(
-            prompt: String,
-            negativePrompt: String = "",
-            startingImage: CGImage? = nil,
-            strength: Float = 1.0,
-            imageCount: Int = 1,
-            stepCount: Int = 50,
-            seed: UInt32 = 0,
-            guidanceScale: Float = 7.5,
-            disableSafety: Bool = false,
-            schedulerType: StableDiffusionScheduler = .pndmScheduler
+            prompt: String
         ) {
             self.prompt = prompt
-            self.negativePrompt = negativePrompt
-            self.startingImage = startingImage
-            self.strength = strength
-            self.imageCount = imageCount
-            self.stepCount = stepCount
-            self.seed = seed
-            self.guidanceScale = guidanceScale
-            self.disableSafety = disableSafety
-            self.schedulerType = schedulerType
         }
         
     }
