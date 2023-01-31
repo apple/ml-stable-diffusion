@@ -25,36 +25,6 @@ public struct StableDiffusionPipeline: ResourceManaging {
         case startingImageProvidedWithoutEncoder
     }
     
-    public enum Mode {
-        case textToImage
-        case imageToImage
-        // case inPainting
-    }
-    
-    public struct SampleInput: Hashable {
-        public var prompt: String
-        public var negativePrompt: String = ""
-        public var startingImage: CGImage? = nil
-        //public var maskImage: CGImage? = nil
-        public var strength: Float = 1.0
-        public var imageCount: Int = 1
-        public var stepCount: Int = 50
-        public var seed: UInt32 = 0
-        public var guidanceScale: Float = 7.5
-        public var disableSafety: Bool = false
-        public var schedulerType: StableDiffusionScheduler = .pndmScheduler
-        
-        public var mode: Mode {
-            guard startingImage != nil else {
-                return .textToImage
-            }
-            guard strength < 1.0 else {
-                return .textToImage
-            }
-            return .imageToImage
-        }
-    }
-
     /// Model to generate embeddings for tokenized input text
     var textEncoder: TextEncoder
 
@@ -137,45 +107,12 @@ public struct StableDiffusionPipeline: ResourceManaging {
         try safetyChecker?.prewarmResources()
     }
 
-    /// Text to image generation using stable diffusion
-    ///
+    /// Image generation using stable diffusion
     /// - Parameters:
-    ///   - prompt: Text prompt to guide sampling
-    ///   - negativePrompt: Negative text prompt to guide sampling
-    ///   - stepCount: Number of inference steps to perform
-    ///   - imageCount: Number of samples/images to generate for the input prompt
-    ///   - seed: Random seed which
-    ///   - guidanceScale: Controls the influence of the text prompt on sampling process (0=random images)
     ///   - disableSafety: Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
     ///   - progressHandler: Callback to perform after each step, stops on receiving false response
     /// - Returns: An array of `imageCount` optional images.
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
-    public func generateImages(
-        prompt: String,
-        negativePrompt: String = "",
-        startingImage: CGImage? = nil,
-        strength: Float = 1.0,
-        imageCount: Int = 1,
-        stepCount: Int = 50,
-        seed: UInt32 = 0,
-        guidanceScale: Float = 7.5,
-        disableSafety: Bool = false,
-        scheduler schedulerType: StableDiffusionScheduler = .pndmScheduler,
-        progressHandler: (Progress) -> Bool = { _ in true }
-    ) throws -> [CGImage?] {
-        try generateImages(input: SampleInput(
-            prompt: prompt,
-            negativePrompt: negativePrompt,
-            startingImage: startingImage,
-            strength: strength,
-            imageCount: imageCount,
-            stepCount: stepCount,
-            seed: seed,
-            guidanceScale: guidanceScale,
-            disableSafety: disableSafety,
-            schedulerType: schedulerType), progressHandler: progressHandler)
-    }
-    
     public func generateImages(
         input: SampleInput,
         progressHandler: (Progress) -> Bool = { _ in true }

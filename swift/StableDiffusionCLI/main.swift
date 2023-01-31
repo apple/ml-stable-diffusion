@@ -119,15 +119,16 @@ struct StableDiffusionSample: ParsableCommand {
         sampleTimer.start()
 
         let images = try pipeline.generateImages(
-            prompt: prompt,
-            negativePrompt: negativePrompt,
-            startingImage: startingImage,
-            strength: strength,
-            imageCount: imageCount,
-            stepCount: stepCount,
-            seed: seed,
-            guidanceScale: guidanceScale,
-            scheduler: scheduler.stableDiffusionScheduler
+            input: StableDiffusionPipeline.SampleInput(
+                prompt: prompt,
+                negativePrompt: negativePrompt,
+                startingImage: startingImage,
+                strength: strength,
+                imageCount: imageCount,
+                stepCount: stepCount,
+                seed: seed,
+                guidanceScale: guidanceScale,
+                schedulerType: scheduler.stableDiffusionScheduler)
         ) { progress in
             sampleTimer.stop()
             handleProgress(progress,sampleTimer)
