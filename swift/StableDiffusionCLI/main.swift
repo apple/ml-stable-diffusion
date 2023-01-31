@@ -8,6 +8,7 @@ import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
 
+
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
 
@@ -31,13 +32,13 @@ struct StableDiffusionSample: ParsableCommand {
             valueName: "directory-path"
         )
     )
-    var resourcePath: String = "./"
+    var resourcePath: String = "compiled"
 
     @Option(help: "Number of images to sample / generate")
-    var imageCount: Int = 1
+    var imageCount: Int = 4
 
     @Option(help: "Number of diffusion steps to perform")
-    var stepCount: Int = 50
+    var stepCount: Int = 100
 
     @Option(
         help: ArgumentHelp(
@@ -50,8 +51,12 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Output path")
     var outputPath: String = "./"
 
+
+    
     @Option(help: "Random seed")
-    var seed: UInt32 = 93
+    var seed: UInt32 = UInt32(arc4random())
+    
+    
 
     @Option(help: "Controls the influence of the text prompt on sampling process (0=random images)")
     var guidanceScale: Float = 7.5
@@ -63,7 +68,7 @@ struct StableDiffusionSample: ParsableCommand {
     var scheduler: SchedulerOption = .pndm
 
     @Flag(help: "Disable safety checking")
-    var disableSafety: Bool = false
+    var disableSafety: Bool = true
 
     @Flag(help: "Reduce memory usage")
     var reduceMemory: Bool = false
@@ -165,6 +170,7 @@ struct StableDiffusionSample: ParsableCommand {
     func imageName(_ sample: Int, step: Int? = nil) -> String {
         let fileCharLimit = 75
         var name = prompt.prefix(fileCharLimit).replacingOccurrences(of: " ", with: "_")
+        var modelName = resourcePath.replacingOccurrences(of: "/", with: "_")
         if imageCount != 1 {
             name += ".\(sample)"
         }
@@ -174,7 +180,7 @@ struct StableDiffusionSample: ParsableCommand {
         if let step = step {
             name += ".\(step)"
         } else {
-            name += ".final"
+            name += ".\(modelName)"
         }
         name += ".png"
         return name

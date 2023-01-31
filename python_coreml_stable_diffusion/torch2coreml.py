@@ -839,7 +839,8 @@ def parser_spec():
     parser.add_argument("--convert-safety-checker", action="store_true")
     parser.add_argument(
         "--model-version",
-        default="CompVis/stable-diffusion-v1-4",
+        #default="CompVis/stable-diffusion-v1-4",
+        default="prompthero/openjourney-v2",
         help=
         ("The pre-trained model checkpoint and configuration to restore. "
          "For available versions: https://huggingface.co/models?search=stable-diffusion"

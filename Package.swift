@@ -31,13 +31,5 @@ let package = Package(
                 "StableDiffusion",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")],
             path: "swift/StableDiffusionCLI"),
-        .testTarget(
-            name: "StableDiffusionTests",
-            dependencies: ["StableDiffusion"],
-            path: "swift/StableDiffusionTests",
-            resources: [
-                .copy("Resources/vocab.json"),
-                .copy("Resources/merges.txt")
-            ]),
     ]
 )

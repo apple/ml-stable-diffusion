@@ -267,7 +267,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         prompt,
         height=512,
         width=512,
-        num_inference_steps=50,
+        num_inference_steps=100,
         guidance_scale=7.5,
         negative_prompt=None,
         num_images_per_prompt=1,
@@ -528,7 +528,7 @@ if __name__ == "__main__":
              "If not specified, the default scheduler from the diffusers pipeline is utilized"))
     parser.add_argument(
         "--num-inference-steps",
-        default=50,
+        default=75,
         type=int,
         help="The number of iterations the unet model will be executed throughout the reverse diffusion process")
     parser.add_argument(
