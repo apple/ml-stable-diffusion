@@ -6,7 +6,7 @@
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.modeling_utils import ModelMixin
+from diffusers import ModelMixin
 
 from enum import Enum
 
@@ -376,7 +376,7 @@ class CrossAttnDownBlock2D(nn.Module):
         self.resnets = nn.ModuleList(resnets)
 
         if add_downsample:
-            self.downsamplers = nn.ModuleList([Downsample2D(in_channels)])
+            self.downsamplers = nn.ModuleList([Downsample2D(out_channels)])
         else:
             self.downsamplers = None
 
