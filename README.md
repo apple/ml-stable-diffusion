@@ -239,6 +239,8 @@ Note that the chunked version of Unet is checked for first. Only if it is not pr
 
 🤗 Hugging Face created an [open-source demo app](https://github.com/huggingface/swift-coreml-diffusers) on top of this library. It's written in native Swift and Swift UI, and runs on macOS, iOS and iPadOS. You can use the code as a starting point for your app, or to see how to integrate this library in your own projects.
 
+Hugging Face has made the app [available in the Mac App Store](https://apps.apple.com/app/diffusers/id1666309574?mt=12).
+
 </details>
 
 ## <a name="performance-benchmark"></a> Performance Benchmark
