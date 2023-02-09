@@ -20,7 +20,11 @@ public enum StableDiffusionScheduler {
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
 @available(iOS 16.2, macOS 13.1, *)
 public struct StableDiffusionPipeline: ResourceManaging {
-
+    
+    public enum Error: String, Swift.Error {
+        case startingImageProvidedWithoutEncoder
+    }
+    
     /// Model to generate embeddings for tokenized input text
     var textEncoder: TextEncoder
 
@@ -29,6 +33,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Model used to generate final image from latent diffusion process
     var decoder: Decoder
+    
+    /// Model used to latent space for image2image, and soon, in-painting
+    var encoder: Encoder?
 
     /// Optional model for checking safety of generated image
     var safetyChecker: SafetyChecker? = nil
@@ -58,11 +65,13 @@ public struct StableDiffusionPipeline: ResourceManaging {
     public init(textEncoder: TextEncoder,
                 unet: Unet,
                 decoder: Decoder,
+                encoder: Encoder?,
                 safetyChecker: SafetyChecker? = nil,
                 reduceMemory: Bool = false) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
+        self.encoder = encoder
         self.safetyChecker = safetyChecker
         self.reduceMemory = reduceMemory
     }
@@ -98,34 +107,20 @@ public struct StableDiffusionPipeline: ResourceManaging {
         try safetyChecker?.prewarmResources()
     }
 
-    /// Text to image generation using stable diffusion
-    ///
+    /// Image generation using stable diffusion
     /// - Parameters:
-    ///   - prompt: Text prompt to guide sampling
-    ///   - negativePrompt: Negative text prompt to guide sampling
-    ///   - stepCount: Number of inference steps to perform
-    ///   - imageCount: Number of samples/images to generate for the input prompt
-    ///   - seed: Random seed which
-    ///   - guidanceScale: Controls the influence of the text prompt on sampling process (0=random images)
     ///   - disableSafety: Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
     ///   - progressHandler: Callback to perform after each step, stops on receiving false response
     /// - Returns: An array of `imageCount` optional images.
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
-        prompt: String,
-        negativePrompt: String = "",
-        imageCount: Int = 1,
-        stepCount: Int = 50,
-        seed: UInt32 = 0,
-        guidanceScale: Float = 7.5,
-        disableSafety: Bool = false,
-        scheduler: StableDiffusionScheduler = .pndmScheduler,
+        configuration config: Configuration,
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
         // Encode the input prompt and negative prompt
-        let promptEmbedding = try textEncoder.encode(prompt)
-        let negativePromptEmbedding = try textEncoder.encode(negativePrompt)
+        let promptEmbedding = try textEncoder.encode(config.prompt)
+        let negativePromptEmbedding = try textEncoder.encode(config.negativePrompt)
 
         if reduceMemory {
             textEncoder.unloadResources()
@@ -141,19 +136,44 @@ public struct StableDiffusionPipeline: ResourceManaging {
         let hiddenStates = toHiddenStates(concatEmbedding)
 
         /// Setup schedulers
-        let scheduler: [Scheduler] = (0..<imageCount).map { _ in
-            switch scheduler {
-            case .pndmScheduler: return PNDMScheduler(stepCount: stepCount)
-            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: stepCount)
+        let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
+            switch config.schedulerType {
+            case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount)
             }
         }
         let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
-        var latents = generateLatentSamples(imageCount, stdev: stdev, seed: seed)
+        var latents: [MLShapedArray<Float32>]
+        let timestepStrength: Float?
+        
+        if
+            let startingImage = config.startingImage,
+            config.mode == .imageToImage
+        {
+            timestepStrength = config.strength
+            guard let encoder else {
+                throw Error.startingImageProvidedWithoutEncoder
+            }
+            
+            let noiseTuples = generateImage2ImageLatentSamples(config.imageCount, stdev: 1, seed: config.seed)
+            latents = try noiseTuples.map({
+                try encoder.encode(
+                    image: startingImage,
+                    diagonalNoise: $0.diagonal,
+                    noise: $0.latentNoise,
+                    alphasCumprodStep: scheduler[0].calculateAlphasCumprod(strength: config.strength))
+            })
+        } else {
+            timestepStrength = nil
+            // Generate random latent samples from specified seed
+            latents = generateLatentSamples(config.imageCount, stdev: stdev, seed: config.seed)
+        }
 
         // De-noising loop
-        for (step,t) in scheduler[0].timeSteps.enumerated() {
+        let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
+        for (step,t) in timeSteps.enumerated() {
 
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
@@ -169,11 +189,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 hiddenStates: hiddenStates
             )
 
-            noise = performGuidance(noise, guidanceScale)
+            noise = performGuidance(noise, config.guidanceScale)
 
             // Have the scheduler compute the previous (t-1) latent
             // sample given the predicted noise and current sample
-            for i in 0..<imageCount {
+            for i in 0..<config.imageCount {
                 latents[i] = scheduler[i].step(
                     output: noise[i],
                     timeStep: t,
@@ -184,11 +204,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
             // Report progress
             let progress = Progress(
                 pipeline: self,
-                prompt: prompt,
+                prompt: config.prompt,
                 step: step,
-                stepCount: stepCount,
+                stepCount: timeSteps.count,
                 currentLatentSamples: latents,
-                isSafetyEnabled: canSafetyCheck && !disableSafety
+                isSafetyEnabled: canSafetyCheck && !config.disableSafety
             )
             if !progressHandler(progress) {
                 // Stop if requested by handler
@@ -201,7 +221,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
 
         // Decode the latent samples to images
-        return try decodeToImages(latents, disableSafety: disableSafety)
+        return try decodeToImages(latents, disableSafety: config.disableSafety)
     }
 
     func generateLatentSamples(_ count: Int, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
@@ -212,6 +232,35 @@ public struct StableDiffusionPipeline: ResourceManaging {
         let samples = (0..<count).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
+        }
+        return samples
+    }
+    
+    
+    /// For image2image -
+    /// - Parameters:
+    ///   - count: batch size
+    ///   - stdev: 1
+    ///   - seed: seed provided
+    ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
+    ///     but I have seen implementations of pipelines where it is the same.
+    /// - Returns: An array of tuples of noise values with length of batch size.
+    func generateImage2ImageLatentSamples(_ count: Int, stdev: Float, seed: UInt32, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
+        var sampleShape = unet.latentSampleShape
+        sampleShape[0] = 1
+
+        var random = NumPyRandomSource(seed: UInt32(truncatingIfNeeded: seed))
+        let samples = (0..<count).map { _ in
+            if diagonalAndLatentNoiseIsSame {
+                let noise = MLShapedArray<Float32>(
+                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
+                return (noise, noise)
+            } else {
+                return (MLShapedArray<Float32>(
+                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))),
+                        MLShapedArray<Float32>(
+                            converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))))
+            }
         }
         return samples
     }

@@ -14,6 +14,9 @@ public protocol Scheduler {
     /// Training diffusion time steps index by inference time step
     var timeSteps: [Int] { get }
 
+    /// Training diffusion time steps index by inference time step
+    func calculateTimesteps(strength: Float?) -> [Int]
+
     /// Schedule of betas which controls the amount of noise added at each timestep
     var betas: [Float] { get }
 
@@ -71,6 +74,34 @@ public extension Scheduler {
     }
 }
 
+// MARK: - Image2Image
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension Scheduler {
+    
+    func calculateAlphasCumprod(strength: Float) -> AlphasCumprodCalculation {
+        AlphasCumprodCalculation(
+            alphasCumprod: alphasCumProd,
+            timesteps: trainStepCount,
+            steps: inferenceStepCount,
+            strength: strength)
+    }
+}
+
+// MARK: - Timesteps
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension Scheduler {
+    func calculateTimesteps(strength: Float?) -> [Int] {
+        guard let strength else { return timeSteps }
+        let startStep = max(inferenceStepCount - Int(Float(inferenceStepCount) * strength), 0)
+        let actualTimesteps = Array(timeSteps[startStep...])
+        return actualTimesteps
+    }
+}
+
+// MARK: - BetaSchedule
+
 /// How to map a beta range to a sequence of betas to step over
 @available(iOS 16.2, macOS 13.1, *)
 public enum BetaSchedule {
@@ -80,6 +111,7 @@ public enum BetaSchedule {
     case scaledLinear
 }
 
+// MARK: - PNDMScheduler
 
 /// A scheduler used to compute a de-noised image
 ///

@@ -7,6 +7,7 @@ import CoreML
 import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
+import Cocoa
 
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
@@ -32,6 +33,12 @@ struct StableDiffusionSample: ParsableCommand {
         )
     )
     var resourcePath: String = "./"
+    
+    @Option(help: "Path to starting image.")
+    var image: String? = nil
+    
+    @Option(help: "Strength for image2image.")
+    var strength: Float = 0.5
 
     @Option(help: "Number of images to sample / generate")
     var imageCount: Int = 1
@@ -51,7 +58,7 @@ struct StableDiffusionSample: ParsableCommand {
     var outputPath: String = "./"
 
     @Option(help: "Random seed")
-    var seed: UInt32 = 93
+    var seed: UInt32 = UInt32.random(in: 0...UInt32.max)
 
     @Option(help: "Controls the influence of the text prompt on sampling process (0=random images)")
     var guidanceScale: Float = 7.5
@@ -84,27 +91,52 @@ struct StableDiffusionSample: ParsableCommand {
                                                    disableSafety: disableSafety,
                                                    reduceMemory: reduceMemory)
         try pipeline.loadResources()
+        
+        let startingImage: CGImage?
+        if let image {
+            let imageURL = URL(filePath: image)
+            do {
+                let imageData = try Data(contentsOf: imageURL)
+                guard
+                    let nsImage = NSImage(data: imageData),
+                    let loadedImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                else {
+                    throw RunError.resources("Starting Image not available \(resourcePath)")
+                }
+                startingImage = loadedImage
+            } catch let error {
+                throw RunError.resources("Starting image not found \(imageURL), error: \(error)")
+            }
+            
+        } else {
+            startingImage = nil
+        }
 
         log("Sampling ...\n")
         let sampleTimer = SampleTimer()
         sampleTimer.start()
 
+        var pipelineConfig = StableDiffusionPipeline.Configuration(prompt: prompt)
+        
+        pipelineConfig.negativePrompt = negativePrompt
+        pipelineConfig.startingImage = startingImage
+        pipelineConfig.strength = strength
+        pipelineConfig.imageCount = imageCount
+        pipelineConfig.stepCount = stepCount
+        pipelineConfig.seed = seed
+        pipelineConfig.guidanceScale = guidanceScale
+        pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
+        
         let images = try pipeline.generateImages(
-            prompt: prompt,
-            negativePrompt: negativePrompt,
-            imageCount: imageCount,
-            stepCount: stepCount,
-            seed: seed,
-            guidanceScale: guidanceScale,
-            scheduler: scheduler.stableDiffusionScheduler
-        ) { progress in
-            sampleTimer.stop()
-            handleProgress(progress,sampleTimer)
-            if progress.stepCount != progress.step {
-                sampleTimer.start()
-            }
-            return true
-        }
+            configuration: pipelineConfig,
+            progressHandler: { progress in
+                sampleTimer.stop()
+                handleProgress(progress,sampleTimer)
+                if progress.stepCount != progress.step {
+                    sampleTimer.start()
+                }
+                return true
+            })
 
         _ = try saveImages(images, logNames: true)
     }
@@ -167,6 +199,10 @@ struct StableDiffusionSample: ParsableCommand {
         var name = prompt.prefix(fileCharLimit).replacingOccurrences(of: " ", with: "_")
         if imageCount != 1 {
             name += ".\(sample)"
+        }
+        
+        if image != "none" {
+            name += ".str\(Int(strength * 100))"
         }
 
         name += ".\(seed)"
