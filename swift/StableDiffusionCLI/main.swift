@@ -7,6 +7,7 @@ import CoreML
 import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
+import Cocoa
 
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
@@ -97,11 +98,8 @@ struct StableDiffusionSample: ParsableCommand {
             do {
                 let imageData = try Data(contentsOf: imageURL)
                 guard
-                    let imgDataProvider = CGDataProvider(data: imageData as CFData),
-                    let loadedImage = CGImage(
-                        pngDataProviderSource: imgDataProvider,
-                        decode: nil, shouldInterpolate: false,
-                        intent: CGColorRenderingIntent.defaultIntent)
+                    let nsImage = NSImage(data: imageData),
+                    let loadedImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
                 else {
                     throw RunError.resources("Starting Image not available \(resourcePath)")
                 }
