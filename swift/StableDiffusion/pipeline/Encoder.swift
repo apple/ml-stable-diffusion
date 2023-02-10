@@ -4,7 +4,7 @@
 import Foundation
 import CoreML
 
-@available(iOS 16.0, macOS 13.1, *)
+@available(iOS 16.2, macOS 13.1, *)
 /// Encoder, currently supports image2image
 public struct Encoder: ResourceManaging {
     
