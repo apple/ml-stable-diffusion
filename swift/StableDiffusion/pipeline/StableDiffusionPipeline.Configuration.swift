@@ -37,6 +37,8 @@ extension StableDiffusionPipeline {
         public var disableSafety: Bool = false
         /// The type of Scheduler to use.
         public var schedulerType: StableDiffusionScheduler = .pndmScheduler
+        /// The type of RNG to use
+        public var rngType: StableDiffusionRNG = .numpyRNG
         
         /// Given the configuration, what mode will be used for generation
         public var mode: Mode {

@@ -13,7 +13,7 @@ import CoreML
 ///  https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/TransformationHelper.h
 ///
 @available(iOS 16.2, macOS 13.1, *)
-struct TorchRandomSource: RandomNumberGenerator {
+struct TorchRandomSource: RandomNumberGenerator, RandomSource {
 
   struct State {
     var key = [UInt32](repeating: 0, count: 624)
