@@ -384,7 +384,7 @@ On iOS, depending on the iPhone model, Stable Diffusion model versions, selected
 
   <b> 1. Random Number Generator Behavior </b>
 
-  The main source of potentially different results across PyTorch and Core ML is the Random Number Generator ([RNG](https://en.wikipedia.org/wiki/Random_number_generation)) behavior. PyTorch and Numpy have different sources of randomness. `python_coreml_stable_diffusion` generally relies on Numpy for RNG (e.g. latents initialization) and `StableDiffusion` Swift Library reproduces this RNG behavior. However, PyTorch-based pipelines such as Hugging Face `diffusers` relies on PyTorch's RNG behavior.
+  The main source of potentially different results across PyTorch and Core ML is the Random Number Generator ([RNG](https://en.wikipedia.org/wiki/Random_number_generation)) behavior. PyTorch and Numpy have different sources of randomness. `python_coreml_stable_diffusion` generally relies on Numpy for RNG (e.g. latents initialization) and `StableDiffusion` Swift Library reproduces this RNG behavior by default. However, PyTorch-based pipelines such as Hugging Face `diffusers` relies on PyTorch's RNG behavior. Thanks to @liuliu's [contribution](https://github.com/apple/ml-stable-diffusion/pull/124), one can match the PyTorch (CPU) RNG behavior in Swift by specifying `--rng torch` which selects the `torchRNG` mode.
 
   <b> 2. PyTorch </b>
 
