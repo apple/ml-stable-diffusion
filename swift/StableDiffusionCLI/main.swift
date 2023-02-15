@@ -129,6 +129,7 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.seed = seed
         pipelineConfig.guidanceScale = guidanceScale
         pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
+        pipelineConfig.rngType = rng.stableDiffusionRNG
         
         let images = try pipeline.generateImages(
             configuration: pipelineConfig,
