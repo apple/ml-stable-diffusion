@@ -10,7 +10,7 @@ import CoreML
 ///  [NumPy's older randomkit.c](https://github.com/numpy/numpy/blob/v1.0/numpy/random/mtrand/randomkit.c)
 ///
 @available(iOS 16.2, macOS 13.1, *)
-struct NumPyRandomSource: RandomNumberGenerator {
+struct NumPyRandomSource: RandomNumberGenerator, RandomSource {
 
     struct State {
         var key = [UInt32](repeating: 0, count: 624)

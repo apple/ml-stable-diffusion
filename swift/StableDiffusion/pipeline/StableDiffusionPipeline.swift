@@ -14,6 +14,14 @@ public enum StableDiffusionScheduler {
     case dpmSolverMultistepScheduler
 }
 
+/// RNG compatible with StableDiffusionPipeline
+public enum StableDiffusionRNG {
+    /// RNG that matches numpy implementation
+    case numpyRNG
+    /// RNG that matches PyTorch CPU implementation.
+    case torchRNG
+}
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
@@ -157,7 +165,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 throw Error.startingImageProvidedWithoutEncoder
             }
             
-            let noiseTuples = generateImage2ImageLatentSamples(config.imageCount, stdev: 1, seed: config.seed)
+            let noiseTuples = generateImage2ImageLatentSamples(config.imageCount, rng: config.rngType, stdev: 1, seed: config.seed)
             latents = try noiseTuples.map({
                 try encoder.encode(
                     image: startingImage,
@@ -168,7 +176,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         } else {
             timestepStrength = nil
             // Generate random latent samples from specified seed
-            latents = generateLatentSamples(config.imageCount, stdev: stdev, seed: config.seed)
+            latents = generateLatentSamples(config.imageCount, rng: config.rngType, stdev: stdev, seed: config.seed)
         }
 
         // De-noising loop
@@ -224,11 +232,19 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return try decodeToImages(latents, disableSafety: config.disableSafety)
     }
 
-    func generateLatentSamples(_ count: Int, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
+    private func randomSource(from rng: StableDiffusionRNG, seed: UInt32) -> RandomSource {
+        switch rng {
+        case .numpyRNG:
+            return NumPyRandomSource(seed: seed)
+        case .torchRNG:
+            return TorchRandomSource(seed: seed)
+        }
+    }
+
+    func generateLatentSamples(_ count: Int, rng: StableDiffusionRNG, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
-
-        var random = NumPyRandomSource(seed: seed)
+        var random = randomSource(from: rng, seed: seed)
         let samples = (0..<count).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
@@ -245,11 +261,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
     ///     but I have seen implementations of pipelines where it is the same.
     /// - Returns: An array of tuples of noise values with length of batch size.
-    func generateImage2ImageLatentSamples(_ count: Int, stdev: Float, seed: UInt32, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
+    func generateImage2ImageLatentSamples(_ count: Int, rng: StableDiffusionRNG, stdev: Float, seed: UInt32, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
 
-        var random = NumPyRandomSource(seed: UInt32(truncatingIfNeeded: seed))
+        var random = randomSource(from: rng, seed: seed)
         let samples = (0..<count).map { _ in
             if diagonalAndLatentNoiseIsSame {
                 let noise = MLShapedArray<Float32>(
