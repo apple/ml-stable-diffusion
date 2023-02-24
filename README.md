@@ -359,7 +359,7 @@ If you intend to use the Python pipeline in an application, we recommend initial
 
 
 <details>
-<summary> <b> </a> Q6: </b> I want to deploy <code>StableDiffusion</code>, the Swift package, in my mobile app. What should I be aware of? </summary>
+<summary> <b> Q6: </b> I want to deploy <code>StableDiffusion</code>, the Swift package, in my mobile app. What should I be aware of? </summary>
 
 <b> A6: </b>The [Image Generation with Swift](#image-generation-with-swift) section describes the minimum SDK and OS versions as well as the device models supported by this package. We recommend carefully testing the package on the device with the least amount of RAM available among your deployment targets.
 
