@@ -205,7 +205,7 @@ struct StableDiffusionSample: ParsableCommand {
             name += ".\(sample)"
         }
         
-        if image != "none" {
+        if image != nil {
             name += ".str\(Int(strength * 100))"
         }
 
