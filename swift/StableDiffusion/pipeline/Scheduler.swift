@@ -72,6 +72,27 @@ public extension Scheduler {
         }
         return MLShapedArray(scalars: scalars, shape: values.first!.shape)
     }
+    
+    func addNoise(
+        originalSample: MLShapedArray<Float32>,
+        noise: [MLShapedArray<Float32>],
+        strength: Float
+    ) -> [MLShapedArray<Float32>] {
+        let startStep = max(inferenceStepCount - Int(Float(inferenceStepCount) * strength), 0)
+        let alphaProdt = alphasCumProd[timeSteps[startStep]]
+        let betaProdt = 1 - alphaProdt
+        let sqrtAlphaProdt = sqrt(alphaProdt)
+        let sqrtBetaProdt = sqrt(betaProdt)
+        
+        let noisySamples = noise.map {
+            weightedSum(
+                [Double(sqrtAlphaProdt), Double(sqrtBetaProdt)],
+                [originalSample, $0]
+            )
+        }
+
+        return noisySamples
+    }
 }
 
 // MARK: - Image2Image
