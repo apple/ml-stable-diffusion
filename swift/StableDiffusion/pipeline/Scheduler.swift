@@ -95,20 +95,6 @@ public extension Scheduler {
     }
 }
 
-// MARK: - Image2Image
-
-@available(iOS 16.2, macOS 13.1, *)
-public extension Scheduler {
-    
-    func calculateAlphasCumprod(strength: Float) -> AlphasCumprodCalculation {
-        AlphasCumprodCalculation(
-            alphasCumprod: alphasCumProd,
-            timesteps: trainStepCount,
-            steps: inferenceStepCount,
-            strength: strength)
-    }
-}
-
 // MARK: - Timesteps
 
 @available(iOS 16.2, macOS 13.1, *)
