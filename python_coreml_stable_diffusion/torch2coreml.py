@@ -469,8 +469,8 @@ def convert_vae_encoder(pipe, args):
             "convert_unet() deletes pipe.unet to save RAM. "
             "Please use convert_vae_encoder() before convert_unet()")
     
-    height = (args.latent_h * 8) if args.latent_h else pipe.vae.config.sample_size
-    width = (args.latent_w * 8) if args.latent_w else pipe.vae.config.sample_size
+    height = (args.latent_h or pipe.unet.config.sample_size) * 8
+    width = (args.latent_w or pipe.unet.config.sample_size) * 8
     
     z_shape = (
         1,  # B
