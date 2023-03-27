@@ -117,7 +117,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Image generation using stable diffusion
     /// - Parameters:
-    ///   - disableSafety: Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
+    ///   - configuration: Image generation configuration
     ///   - progressHandler: Callback to perform after each step, stops on receiving false response
     /// - Returns: An array of `imageCount` optional images.
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
@@ -256,6 +256,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
     /// For image2image -
     /// - Parameters:
     ///   - count: batch size
+    ///   - rng: RNG compatible with `StableDiffusionPipeline`
     ///   - stdev: 1
     ///   - seed: seed provided
     ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
