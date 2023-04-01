@@ -32,6 +32,7 @@ import os
 from python_coreml_stable_diffusion.coreml_model import (
     CoreMLModel,
     _load_mlpackage,
+    _load_mlpackage_controlnet,
     get_available_compute_units,
 )
 
@@ -39,6 +40,7 @@ import time
 import torch  # Only used for `torch.from_tensor` in `pipe.scheduler.step()`
 from transformers import CLIPFeatureExtractor, CLIPTokenizer
 from typing import List, Optional, Union
+from PIL import Image
 
 
 class CoreMLStableDiffusionPipeline(DiffusionPipeline):
@@ -60,6 +62,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                          LMSDiscreteScheduler,
                          PNDMScheduler],
         tokenizer: CLIPTokenizer,
+        controlnet: Optional[List[CoreMLModel]],
     ):
         super().__init__()
 
@@ -69,6 +72,8 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             scheduler=scheduler,
             feature_extractor=feature_extractor,
         )
+
+        safety_checker = None
 
         if safety_checker is None:
             # Reproduce original warning:
@@ -87,6 +92,8 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         self.text_encoder = text_encoder
         self.unet = unet
         self.unet.in_channels = self.unet.expected_inputs["sample"]["shape"][1]
+
+        self.controlnet = controlnet
 
         self.vae_decoder = vae_decoder
 
@@ -168,6 +175,33 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
 
         return text_embeddings
 
+    def run_controlnet(self, 
+                       sample, 
+                       timestep, 
+                       encoder_hidden_states, 
+                       controlnet_cond, 
+                       output_dtype=np.float16):
+        if not self.controlnet:
+            raise ValueError(
+                "Conditions for controlnet are given but the pipeline has no controlnet modules")
+
+        for i, (module, cond) in enumerate(zip(self.controlnet, controlnet_cond)):
+            module_outputs = module(
+                sample=sample.astype(np.float16), 
+                timestep=timestep.astype(np.float16), 
+                encoder_hidden_states=encoder_hidden_states.astype(np.float16), 
+                controlnet_cond=cond.astype(np.float16),
+            )
+            if i == 0:
+                outputs = module_outputs
+            else:
+                for key in outputs.keys():
+                    outputs[key] += module_outputs[key]
+        
+        outputs = {k: v.astype(output_dtype) for k, v in outputs.items()}
+        
+        return outputs
+
     def run_safety_checker(self, image):
         if self.safety_checker is not None:
             safety_checker_input = self.feature_extractor(
@@ -221,6 +255,19 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
 
         return latents
+
+    def prepare_control_cond(self, 
+                             controlnet_cond, 
+                             do_classifier_free_guidance, 
+                             batch_size, 
+                             num_images_per_prompt):
+        processed_cond_list = []
+        for cond in controlnet_cond:
+            cond = np.stack([cond] * batch_size * num_images_per_prompt)
+            if do_classifier_free_guidance:
+                cond = np.concatenate([cond] * 2)
+            processed_cond_list.append(cond)
+        return processed_cond_list
 
     def check_inputs(self, prompt, height, width, callback_steps):
         if height != self.height or width != self.width:
@@ -276,6 +323,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         return_dict=True,
         callback=None,
         callback_steps=1,
+        controlnet_cond=None,
         **kwargs,
     ):
         # 1. Check inputs. Raise error if not correct
@@ -305,7 +353,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         self.scheduler.set_timesteps(num_inference_steps)
         timesteps = self.scheduler.timesteps
 
-        # 5. Prepare latent variables
+        # 5. Prepare latent variables and controlnet_cond
         num_channels_latents = self.unet.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -314,6 +362,14 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             width,
             latents,
         )
+
+        if controlnet_cond:
+            controlnet_cond = self.prepare_control_cond(
+                controlnet_cond,
+                do_classifier_free_guidance,
+                batch_size,
+                num_images_per_prompt,
+            )
 
         # 6. Prepare extra step kwargs
         extra_step_kwargs = self.prepare_extra_step_kwargs(eta)
@@ -326,11 +382,23 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             latent_model_input = self.scheduler.scale_model_input(
                 latent_model_input, t)
 
+            # controlnet
+            if controlnet_cond:
+                additional_residuals = self.run_controlnet(
+                    sample=latent_model_input,
+                    timestep=np.array([t, t]),
+                    encoder_hidden_states=text_embeddings,
+                    controlnet_cond=controlnet_cond,
+                )
+            else:
+                additional_residuals = {}
+
             # predict the noise residual
             noise_pred = self.unet(
                 sample=latent_model_input.astype(np.float16),
                 timestep=np.array([t, t], np.float16),
                 encoder_hidden_states=text_embeddings.astype(np.float16),
+                **additional_residuals,
             )["noise_pred"]
 
             # perform guidance
@@ -385,7 +453,8 @@ def get_coreml_pipe(pytorch_pipe,
                     model_version,
                     compute_unit,
                     delete_original_pipe=True,
-                    scheduler_override=None):
+                    scheduler_override=None,
+                    controlnet_models=None):
     """ Initializes and returns a `CoreMLStableDiffusionPipeline` from an original
     diffusers PyTorch pipeline
     """
@@ -416,6 +485,22 @@ def get_coreml_pipe(pytorch_pipe,
         del pytorch_pipe
         gc.collect()
         logger.info("Removed PyTorch pipe to reduce peak memory consumption")
+
+    if controlnet_models:
+        model_names_to_load.remove("unet")
+        coreml_pipe_kwargs["unet"] = _load_mlpackage(
+            "control-unet",
+            mlpackages_dir,
+            model_version,
+            compute_unit,
+        )
+        coreml_pipe_kwargs["controlnet"] = [_load_mlpackage_controlnet(
+            mlpackages_dir, 
+            model_version, 
+            compute_unit,
+        ) for model_version in controlnet_models]
+    else:
+        coreml_pipe_kwargs["controlnet"] = None
 
     # Load Core ML models
     logger.info(f"Loading Core ML models in memory from {mlpackages_dir}")
@@ -453,6 +538,11 @@ def get_image_path(args, **override_kwargs):
 
     return os.path.join(out_folder, out_fname + ".png")
 
+def prepare_controlnet_cond(image_path, height, width):
+    image = Image.open(image_path).convert("RGB")
+    image = image.resize((height, width), resample=Image.LANCZOS)
+    image = np.array(image).transpose(2, 0, 1) / 255.0
+    return image
 
 def main(args):
     logger.info(f"Setting random seed to {args.seed}")
@@ -472,7 +562,17 @@ def main(args):
                                   mlpackages_dir=args.i,
                                   model_version=args.model_version,
                                   compute_unit=args.compute_unit,
-                                  scheduler_override=user_specified_scheduler)
+                                  scheduler_override=user_specified_scheduler,
+                                  controlnet_models=args.controlnet)
+
+    if args.controlnet:
+        controlnet_cond = []
+        for i, _ in enumerate(args.controlnet):
+            image_path = args.controlnet_input[i]
+            image = prepare_controlnet_cond(image_path, coreml_pipe.height, coreml_pipe.width)
+            controlnet_cond.append(image)
+    else:
+        controlnet_cond = None
 
     logger.info("Beginning image generation.")
     image = coreml_pipe(
@@ -480,7 +580,8 @@ def main(args):
         height=coreml_pipe.height,
         width=coreml_pipe.width,
         num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale
+        guidance_scale=args.guidance_scale,
+        controlnet_cond=controlnet_cond,
     )
 
     out_path = get_image_path(args)
@@ -535,6 +636,16 @@ if __name__ == "__main__":
         default=7.5,
         type=float,
         help="Controls the influence of the text prompt on sampling process (0=random images)")
+    parser.add_argument(
+        "--controlnet",
+        nargs="*", 
+        type=str,
+        help="")
+    parser.add_argument(
+        "--controlnet-input",
+        nargs="*", 
+        type=str,
+        help="")
 
     args = parser.parse_args()
     main(args)

@@ -98,5 +98,22 @@ def _load_mlpackage(submodule_name, mlpackages_dir, model_version,
 
     return CoreMLModel(mlpackage_path, compute_unit)
 
+def _load_mlpackage_controlnet(mlpackages_dir, model_version, compute_unit):
+    """ Load Core ML (mlpackage) models from disk (As exported by torch2coreml.py)
+    """
+    model_name = model_version.replace("/", "_")
+
+    logger.info(f"Loading controlnet_{model_name} mlpackage")
+
+    fname = f"ControlNet_{model_name}.mlpackage"
+
+    mlpackage_path = os.path.join(mlpackages_dir, fname)
+
+    if not os.path.exists(mlpackage_path):
+        raise FileNotFoundError(
+            f"controlnet_{model_name} CoreML model doesn't exist at {mlpackage_path}")
+
+    return CoreMLModel(mlpackage_path, compute_unit)
+
 def get_available_compute_units():
     return tuple(cu for cu in ct.ComputeUnit._member_names_)
