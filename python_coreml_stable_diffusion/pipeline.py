@@ -353,7 +353,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         self.scheduler.set_timesteps(num_inference_steps)
         timesteps = self.scheduler.timesteps
 
-        # 5. Prepare latent variables and controlnet_cond
+        # 5. Prepare latent variables and controlnet cond
         num_channels_latents = self.unet.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -640,12 +640,14 @@ if __name__ == "__main__":
         "--controlnet",
         nargs="*", 
         type=str,
-        help="")
+        help=("Enables ControlNet and use control-unet instead of unet for additional inputs. "
+            "For Multi-Controlnet, provide the model names separated by spaces."))
     parser.add_argument(
         "--controlnet-input",
         nargs="*", 
         type=str,
-        help="")
+        help=("Image paths for ControlNet inputs. "
+            "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
 
     args = parser.parse_args()
     main(args)

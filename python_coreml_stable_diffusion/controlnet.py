@@ -1,3 +1,8 @@
+#
+# For licensing see accompanying LICENSE.md file.
+# Copyright (C) 2022 Apple Inc. All Rights Reserved.
+#
+
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers import ModelMixin
 
@@ -27,9 +32,7 @@ class ControlNetConditioningEmbedding(nn.Module):
             self.blocks.append(nn.Conv2d(channel_in, channel_in, kernel_size=3, padding=1))
             self.blocks.append(nn.Conv2d(channel_in, channel_out, kernel_size=3, padding=1, stride=2))
 
-        self.conv_out = zero_module(
-            nn.Conv2d(block_out_channels[-1], conditioning_embedding_channels, kernel_size=3, padding=1)
-        )
+        self.conv_out = nn.Conv2d(block_out_channels[-1], conditioning_embedding_channels, kernel_size=3, padding=1)
 
     def forward(self, conditioning):
         embedding = self.conv_in(conditioning)
@@ -130,7 +133,6 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         output_channel = block_out_channels[0]
 
         controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
-        controlnet_block = zero_module(controlnet_block)
         self.controlnet_down_blocks.append(controlnet_block)
 
         for i, down_block_type in enumerate(down_block_types):
@@ -154,19 +156,16 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
             for _ in range(layers_per_block):
                 controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
-                controlnet_block = zero_module(controlnet_block)
                 self.controlnet_down_blocks.append(controlnet_block)
 
             if not is_final_block:
                 controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
-                controlnet_block = zero_module(controlnet_block)
                 self.controlnet_down_blocks.append(controlnet_block)
 
         # mid
         mid_block_channel = block_out_channels[-1]
 
         controlnet_block = nn.Conv2d(mid_block_channel, mid_block_channel, kernel_size=1)
-        controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
 
         self.mid_block = UNetMidBlock2DCrossAttn(
@@ -183,13 +182,13 @@ class ControlNetModel(ModelMixin, ConfigMixin):
             upcast_attention=upcast_attention,
         )
 
-    def get_num_down_samples(self):
-        num_down_res = 1
+    def get_num_residuals(self):
+        num_res = 2 # initial sample + mid block
         for down_block in self.down_blocks:
-            num_down_res += len(down_block.resnets)
+            num_res += len(down_block.resnets)
             if hasattr(down_block, "downsamplers") and down_block.downsamplers is not None:
-                num_down_res += len(down_block.downsamplers)
-        return num_down_res
+                num_res += len(down_block.downsamplers)
+        return num_res
 
     def forward(
         self,
@@ -232,7 +231,6 @@ class ControlNetModel(ModelMixin, ConfigMixin):
             )
 
         # 5. Control net blocks
-
         controlnet_down_block_res_samples = ()
 
         for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
@@ -244,8 +242,3 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         mid_block_res_sample = self.controlnet_mid_block(sample)
 
         return down_block_res_samples, mid_block_res_sample
-
-def zero_module(module):
-    for p in module.parameters():
-        nn.init.zeros_(p)
-    return module

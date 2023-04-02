@@ -99,9 +99,6 @@ def report_correctness(original_outputs, final_outputs, log_prefix):
         )
     return final_psnr
 
-def mae(tensor1, tensor2):
-    return np.mean(np.abs(tensor1 - tensor2))
-
 def _get_out_path(args, submodule_name):
     fname = f"Stable_Diffusion_version_{args.model_version}_{submodule_name}.mlpackage"
     fname = fname.replace("/", "_")
@@ -683,6 +680,12 @@ def convert_unet(pipe, args):
             ("encoder_hidden_states", torch.rand(*encoder_hidden_states_shape))
         ])
 
+        # Prepare inputs
+        baseline_sample_unet_inputs = deepcopy(sample_unet_inputs)
+        baseline_sample_unet_inputs[
+            "encoder_hidden_states"] = baseline_sample_unet_inputs[
+                "encoder_hidden_states"].squeeze(2).transpose(1, 2)
+
         # Initialize reference unet
         reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
         load_state_dict_summary = reference_unet.load_state_dict(
@@ -714,20 +717,20 @@ def convert_unet(pipe, args):
                 (batch_size, reference_unet.mid_block.resnets[-1].out_channels, out_h, out_w)
             )
 
+            baseline_sample_unet_inputs["down_block_additional_residuals"] = ()
             for i, shape in enumerate(additional_residuals_shapes):
-                sample_unet_inputs[f"additional_residual_{i}"] = torch.rand(*shape)
+                sample_residual_input = torch.rand(*shape)
+                sample_unet_inputs[f"additional_residual_{i}"] = sample_residual_input
+                if i == len(additional_residuals_shapes) - 1:
+                    baseline_sample_unet_inputs["mid_block_additional_residual"] = sample_residual_input
+                else:
+                    baseline_sample_unet_inputs["down_block_additional_residuals"] += (sample_residual_input, )
 
         sample_unet_inputs_spec = {
             k: (v.shape, v.dtype)
             for k, v in sample_unet_inputs.items()
         }
         logger.info(f"Sample UNet inputs spec: {sample_unet_inputs_spec}")
-
-        # Prepare inputs
-        baseline_sample_unet_inputs = deepcopy(sample_unet_inputs)
-        baseline_sample_unet_inputs[
-            "encoder_hidden_states"] = baseline_sample_unet_inputs[
-                "encoder_hidden_states"].squeeze(2).transpose(1, 2)
 
         # JIT trace
         logger.info("JIT tracing..")
@@ -741,7 +744,6 @@ def convert_unet(pipe, args):
             reference_out = reference_unet(*sample_unet_inputs.values())[0].numpy()
             report_correctness(baseline_out, reference_out,
                                "unet baseline to reference PyTorch")
-            logger.info(f"MAE: {mae(baseline_out, reference_out)}")
 
         del pipe.unet
         gc.collect()
@@ -789,7 +791,6 @@ def convert_unet(pipe, args):
                 coreml_unet.predict(coreml_sample_unet_inputs).values())[0]
             report_correctness(baseline_out, coreml_out,
                                "unet baseline PyTorch to reference CoreML")
-            logger.info(f"MAE: {mae(baseline_out, coreml_out)}")
 
         del coreml_unet
         gc.collect()
@@ -1069,8 +1070,8 @@ def convert_controlnet(pipe, args):
         load_state_dict_summary = reference_controlnet.load_state_dict(
             original_controlnet.state_dict())
 
-        num_down_samples = reference_controlnet.get_num_down_samples()
-        output_keys = [f"additional_residual_{i}" for i in range(num_down_samples + 1)]
+        num_residuals = reference_controlnet.get_num_residuals()
+        output_keys = [f"additional_residual_{i}" for i in range(num_residuals)]
 
         # JIT trace
         logger.info("JIT tracing..")
@@ -1094,13 +1095,12 @@ def convert_controlnet(pipe, args):
                 logger.info(f"Check {key} correctness")
                 report_correctness(b_out, r_out,
                                 f"controlnet({controlnet_model_name}) baseline to reference PyTorch")
-                logger.info(f"MAE: {mae(b_out, r_out)}")
 
         del original_controlnet
         gc.collect()
 
         coreml_sample_controlnet_inputs = {
-            k: v.numpy().astype(np.float32)
+            k: v.numpy().astype(np.float16)
             for k, v in sample_controlnet_inputs.items()
         }
 
@@ -1129,14 +1129,13 @@ def convert_controlnet(pipe, args):
             "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
             "Shorter text does not reduce computation."
         coreml_controlnet.input_description["controlnet_cond"] = \
-            "The conditional image for ControlNet"
+            "An additional input image for ControlNet to condition the generated images."
 
         # Set the output descriptions
-        # coreml_controlnet.output_description["down_block_res_samples"] = \
-        #     "The List containing outputs of each downsampling block in ControlNet. " \
-        #     "The outputs are added to every value passed to up-blocks in UNet."
-        # coreml_controlnet.output_description["mid_block_res_sample"] = \
-        #     "The output of mid-block in ControlNet, being added before Up-Block in UNet."
+        for i in range(num_residuals):
+            coreml_controlnet.output_description[f"additional_residual_{i}"] = \
+                "One of the outputs of each downsampling block in ControlNet. " \
+                "The value added to the corresponding resnet output in UNet."
 
         _save_mlpackage(coreml_controlnet, out_path)
         logger.info(f"Saved controlnet into {out_path}")
@@ -1149,7 +1148,6 @@ def convert_controlnet(pipe, args):
                 logger.info(f"Check {key} correctness")
                 report_correctness(b_out, coreml_out[key],
                                 "controlnet baseline PyTorch to reference CoreML")
-                logger.info(f"MAE: {mae(b_out, coreml_out[key])}")
         
         del coreml_controlnet
         gc.collect()
@@ -1224,7 +1222,14 @@ def parser_spec():
     parser.add_argument("--convert-vae-encoder", action="store_true")
     parser.add_argument("--convert-unet", action="store_true")
     parser.add_argument("--convert-safety-checker", action="store_true")
-    parser.add_argument("--convert-controlnet", nargs="*", type=str)
+    parser.add_argument(
+        "--convert-controlnet", 
+        nargs="*", 
+        type=str,
+        help=
+        "Converts a ControlNet model hosted on HuggingFace to coreML format. " \
+        "To convert multiple models, provide their names separated by spaces.",
+    )
     parser.add_argument(
         "--model-version",
         default="CompVis/stable-diffusion-v1-4",
