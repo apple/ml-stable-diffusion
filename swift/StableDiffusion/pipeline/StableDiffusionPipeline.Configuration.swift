@@ -39,6 +39,10 @@ extension StableDiffusionPipeline {
         public var schedulerType: StableDiffusionScheduler = .pndmScheduler
         /// The type of RNG to use
         public var rngType: StableDiffusionRNG = .numpyRNG
+        /// Scale factor to use on the latent after encoding
+        public var encoderScaleFactor: Float32 = 0.18215
+        /// Scale factor to use on the latent before decoding
+        public var decoderScaleFactor: Float32 = 0.18215
         
         /// Given the configuration, what mode will be used for generation
         public var mode: Mode {

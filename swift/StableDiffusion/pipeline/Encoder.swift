@@ -47,7 +47,7 @@ public struct Encoder: ResourceManaging {
     ///  - Returns: The encoded latent space as MLShapedArray
     public func encode(
         _ image: CGImage,
-        scaleFactor: Float32 = 0.18215,
+        scaleFactor: Float32,
         random: inout RandomSource
     ) throws -> MLShapedArray<Float32> {
         let imageData = try image.plannerRGBShapedArray

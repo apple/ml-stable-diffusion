@@ -192,7 +192,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 step: step,
                 stepCount: timeSteps.count,
                 currentLatentSamples: latents,
-                isSafetyEnabled: canSafetyCheck && !config.disableSafety
+                configuration: config
             )
             if !progressHandler(progress) {
                 // Stop if requested by handler
@@ -205,7 +205,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
 
         // Decode the latent samples to images
-        return try decodeToImages(latents, disableSafety: config.disableSafety)
+        return try decodeToImages(latents, configuration: config)
     }
 
     private func randomSource(from rng: StableDiffusionRNG, seed: UInt32) -> RandomSource {
@@ -231,7 +231,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
             guard let encoder else {
                 throw Error.startingImageProvidedWithoutEncoder
             }
-            let latent = try encoder.encode(image, random: &random)
+            let latent = try encoder.encode(image, scaleFactor: config.encoderScaleFactor, random: &random)
             return scheduler.addNoise(originalSample: latent, noise: samples, strength: config.strength)
         }
         return samples
@@ -274,16 +274,14 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return MLShapedArray<Float32>(scalars: resultScalars, shape: shape)
     }
 
-    func decodeToImages(_ latents: [MLShapedArray<Float32>],
-                        disableSafety: Bool) throws -> [CGImage?] {
-
-        let images = try decoder.decode(latents)
+    func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
+        let images = try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
         if reduceMemory {
             decoder.unloadResources()
         }
 
         // If safety is disabled return what was decoded
-        if disableSafety {
+        if config.disableSafety {
             return images
         }
 
@@ -315,11 +313,12 @@ extension StableDiffusionPipeline {
         public let step: Int
         public let stepCount: Int
         public let currentLatentSamples: [MLShapedArray<Float32>]
-        public let isSafetyEnabled: Bool
+        public let configuration: Configuration
+        public var isSafetyEnabled: Bool {
+            pipeline.canSafetyCheck && !configuration.disableSafety
+        }
         public var currentImages: [CGImage?] {
-            try! pipeline.decodeToImages(
-                currentLatentSamples,
-                disableSafety: !isSafetyEnabled)
+            try! pipeline.decodeToImages(currentLatentSamples, configuration: configuration)
         }
     }
 }

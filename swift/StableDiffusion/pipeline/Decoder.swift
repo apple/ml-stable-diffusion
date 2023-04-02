@@ -36,13 +36,16 @@ public struct Decoder: ResourceManaging {
     ///  - Parameters:
     ///    - latents: Batch of latent samples to decode
     ///  - Returns: decoded images
-    public func decode(_ latents: [MLShapedArray<Float32>]) throws -> [CGImage] {
+    public func decode(
+        _ latents: [MLShapedArray<Float32>],
+        scaleFactor: Float32
+    ) throws -> [CGImage] {
 
         // Form batch inputs for model
         let inputs: [MLFeatureProvider] = try latents.map { sample in
             // Reference pipeline scales the latent samples before decoding
             let sampleScaled = MLShapedArray<Float32>(
-                scalars: sample.scalars.map { $0 / 0.18215 },
+                scalars: sample.scalars.map { $0 / scaleFactor },
                 shape: sample.shape)
 
             let dict = [inputName: MLMultiArray(sampleScaled)]
