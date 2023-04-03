@@ -4,23 +4,12 @@
 import Foundation
 import CoreML
 
+/// A encoder model which produces latent samples from RGB images
 @available(iOS 16.2, macOS 13.1, *)
-/// Encoder, currently supports image2image
 public struct Encoder: ResourceManaging {
     
-    public enum FeatureName: String {
-        case sample = "sample"
-        case diagonalNoise = "diagonal_noise"
-        case noise = "noise"
-        case sqrtAlphasCumprod = "sqrt_alphas_cumprod"
-        case sqrtOneMinusAlphasCumprod = "sqrt_one_minus_alphas_cumprod"
-    }
-    
     public enum Error: String, Swift.Error {
-        case latentOutputNotValid
-        case batchLatentOutputEmpty
         case sampleInputShapeNotCorrect
-        case noiseInputShapeNotCorrect
     }
     
     /// VAE encoder model + post math and adding noise from schedular
@@ -49,83 +38,71 @@ public struct Encoder: ResourceManaging {
     /// Prediction queue
     let queue = DispatchQueue(label: "encoder.predict")
 
-    /// Batch encode latent samples into images
-    /// - Parameters:
-    ///   - image: image used for image2image
-    ///   - diagonalNoise: random noise for `DiagonalGaussianDistribution` operation
-    ///   - noise: random noise for initial latent space based on strength argument
-    ///   - alphasCumprodStep: calculations using the scheduler traditionally calculated in the pipeline in pyTorch Diffusers library.
-    /// - Returns: The encoded latent space as MLShapedArray
+    /// Encode image into latent sample
+    ///
+    ///  - Parameters:
+    ///    - image: Input image
+    ///    - scaleFactor
+    ///    - random
+    ///  - Returns: The encoded latent space as MLShapedArray
     public func encode(
-        image:  CGImage,
-        diagonalNoise: MLShapedArray<Float32>,
-        noise: MLShapedArray<Float32>,
-        alphasCumprodStep: AlphasCumprodCalculation
+        _ image: CGImage,
+        scaleFactor: Float32,
+        random: inout RandomSource
     ) throws -> MLShapedArray<Float32> {
-        let sample = try image.plannerRGBShapedArray
-        let sqrtAlphasCumprod = MLShapedArray(scalars: [alphasCumprodStep.sqrtAlphasCumprod], shape: [1, 1])
-        let sqrtOneMinusAlphasCumprod = MLShapedArray(scalars: [alphasCumprodStep.sqrtOneMinusAlphasCumprod], shape: [1, 1])
+        let imageData = try image.plannerRGBShapedArray
+        guard imageData.shape == inputShape else {
+            // TODO: Consider auto resizing and croping similar to how Vision or CoreML auto-generated Swift code can accomplish with `MLFeatureValue`
+            throw Error.sampleInputShapeNotCorrect
+        }
+        let dict = [inputName: MLMultiArray(imageData)]
+        let input = try MLDictionaryFeatureProvider(dictionary: dict)
         
-        let dict: [String: Any] = [
-            FeatureName.sample.rawValue: MLMultiArray(sample),
-            FeatureName.diagonalNoise.rawValue: MLMultiArray(diagonalNoise),
-            FeatureName.noise.rawValue: MLMultiArray(noise),
-            FeatureName.sqrtAlphasCumprod.rawValue: MLMultiArray(sqrtAlphasCumprod),
-            FeatureName.sqrtOneMinusAlphasCumprod.rawValue: MLMultiArray(sqrtOneMinusAlphasCumprod),
-        ]
-        let featureProvider = try MLDictionaryFeatureProvider(dictionary: dict)
+        let result = try model.perform { model in
+            try model.prediction(from: input)
+        }
+        let outputName = result.featureNames.first!
+        let outputValue = result.featureValue(for: outputName)!.multiArrayValue!
+        let output = MLShapedArray<Float32>(outputValue)
         
-        let batch = MLArrayBatchProvider(array: [featureProvider])
+        // DiagonalGaussianDistribution
+        let mean = output[0][0..<4]
+        let logvar = MLShapedArray<Float32>(
+            scalars: output[0][4..<8].scalars.map { min(max($0, -30), 20) },
+            shape: mean.shape
+        )
+        let std = MLShapedArray<Float32>(
+            scalars: logvar.scalars.map { exp(0.5 * $0) },
+            shape: logvar.shape
+        )
+        let latent = MLShapedArray<Float32>(
+            scalars: zip(mean.scalars, std.scalars).map {
+                Float32(random.nextNormal(mean: Double($0), stdev: Double($1)))
+            },
+            shape: logvar.shape
+        )
+        
+        // Reference pipeline scales the latent after encoding
+        let latentScaled = MLShapedArray<Float32>(
+            scalars: latent.scalars.map { $0 * scaleFactor },
+            shape: [1] + latent.shape
+        )
 
-        // Batch predict with model
-        
-        let results = try queue.sync {
-            try model.perform { model in
-                if let feature = model.modelDescription.inputDescriptionsByName[FeatureName.sample.rawValue],
-                   let shape = feature.multiArrayConstraint?.shape as? [Int]
-                {
-                    guard sample.shape == shape else {
-                        // TODO: Consider auto resizing and croping similar to how Vision or CoreML auto-generated Swift code can accomplish with `MLFeatureValue`
-                        throw Error.sampleInputShapeNotCorrect
-                    }
-                }
-                
-                if let feature = model.modelDescription.inputDescriptionsByName[FeatureName.noise.rawValue],
-                   let shape = feature.multiArrayConstraint?.shape as? [Int]
-                {
-                    guard noise.shape == shape else {
-                        throw Error.noiseInputShapeNotCorrect
-                    }
-                }
-                
-                if let feature = model.modelDescription.inputDescriptionsByName[FeatureName.diagonalNoise.rawValue],
-                   let shape = feature.multiArrayConstraint?.shape as? [Int]
-                {
-                    guard diagonalNoise.shape == shape else {
-                        throw Error.noiseInputShapeNotCorrect
-                    }
-                }
-                 
-                return try model.predictions(fromBatch: batch)
-            }
-        }
-        
-        let batchLatents: [MLShapedArray<Float32>] = try (0..<results.count).compactMap { i in
-            let result = results.features(at: i)
-            guard
-                let outputName = result.featureNames.first,
-                let output = result.featureValue(for: outputName)?.multiArrayValue
-            else {
-                throw Error.latentOutputNotValid
-            }
-            return MLShapedArray(output)
-        }
-        
-        guard let latents = batchLatents.first else {
-            throw Error.batchLatentOutputEmpty
-        }
-        
-        return latents
+        return latentScaled
     }
     
+    var inputDescription: MLFeatureDescription {
+        try! model.perform { model in
+            model.modelDescription.inputDescriptionsByName["z"]!
+        }
+    }
+    
+    var inputName: String {
+        inputDescription.name
+    }
+    
+    /// The expected shape of the models latent sample input
+    var inputShape: [Int] {
+        inputDescription.multiArrayConstraint!.shape.map { $0.intValue }
+    }
 }

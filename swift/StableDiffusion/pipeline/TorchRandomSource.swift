@@ -104,6 +104,11 @@ struct TorchRandomSource: RandomNumberGenerator, RandomSource {
     state.nextGauss = radius * sin(theta)
     return radius * cos(theta)
   }
+    
+  /// Generates a random value from a normal distribution with given mean and standard deviation.
+  mutating func nextNormal(mean: Double = 0.0, stdev: Double = 1.0) -> Double {
+    nextGauss() * stdev + mean
+  }
 
   /// Generates an array of random values from a normal distribution with given mean and standard deviation.
   /// This simulates torch.randn([1, 4, 64, 64], dtype=torch.float), note that for dtype=torch.double, it
@@ -112,7 +117,7 @@ struct TorchRandomSource: RandomNumberGenerator, RandomSource {
     // If it is smaller than 16 elements, Torch generates from Box-Muller transform directly.
     // Note that even if this is used to generate Float, it will use Double underneath.
     guard count >= 16 else {
-      return (0..<count).map { _ in nextGauss() * stdev + mean }
+      return (0..<count).map { _ in nextNormal(mean: mean, stdev: stdev) }
     }
     // Otherwise, Torch first fill a uniform distribution array, then do Box-Muller
     // transformation over this array.

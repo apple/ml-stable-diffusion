@@ -150,34 +150,10 @@ public struct StableDiffusionPipeline: ResourceManaging {
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount)
             }
         }
-        let stdev = scheduler[0].initNoiseSigma
 
         // Generate random latent samples from specified seed
-        var latents: [MLShapedArray<Float32>]
-        let timestepStrength: Float?
-        
-        if
-            let startingImage = config.startingImage,
-            config.mode == .imageToImage
-        {
-            timestepStrength = config.strength
-            guard let encoder else {
-                throw Error.startingImageProvidedWithoutEncoder
-            }
-            
-            let noiseTuples = generateImage2ImageLatentSamples(config.imageCount, rng: config.rngType, stdev: 1, seed: config.seed)
-            latents = try noiseTuples.map({
-                try encoder.encode(
-                    image: startingImage,
-                    diagonalNoise: $0.diagonal,
-                    noise: $0.latentNoise,
-                    alphasCumprodStep: scheduler[0].calculateAlphasCumprod(strength: config.strength))
-            })
-        } else {
-            timestepStrength = nil
-            // Generate random latent samples from specified seed
-            latents = generateLatentSamples(config.imageCount, rng: config.rngType, stdev: stdev, seed: config.seed)
-        }
+        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+        let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
 
         // De-noising loop
         let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
@@ -216,7 +192,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 step: step,
                 stepCount: timeSteps.count,
                 currentLatentSamples: latents,
-                isSafetyEnabled: canSafetyCheck && !config.disableSafety
+                configuration: config
             )
             if !progressHandler(progress) {
                 // Stop if requested by handler
@@ -229,7 +205,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
 
         // Decode the latent samples to images
-        return try decodeToImages(latents, disableSafety: config.disableSafety)
+        return try decodeToImages(latents, configuration: config)
     }
 
     private func randomSource(from rng: StableDiffusionRNG, seed: UInt32) -> RandomSource {
@@ -241,43 +217,22 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
     }
 
-    func generateLatentSamples(_ count: Int, rng: StableDiffusionRNG, stdev: Float, seed: UInt32) -> [MLShapedArray<Float32>] {
+    func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
-        var random = randomSource(from: rng, seed: seed)
-        let samples = (0..<count).map { _ in
+        
+        let stdev = scheduler.initNoiseSigma
+        var random = randomSource(from: config.rngType, seed: config.seed)
+        let samples = (0..<config.imageCount).map { _ in
             MLShapedArray<Float32>(
                 converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
         }
-        return samples
-    }
-    
-    
-    /// For image2image -
-    /// - Parameters:
-    ///   - count: batch size
-    ///   - rng: RNG compatible with `StableDiffusionPipeline`
-    ///   - stdev: 1
-    ///   - seed: seed provided
-    ///   - diagonalAndLatentNoiseIsSame: Diffusions library does not seem to use the same noise for the `DiagonalGaussianDistribution` operation,
-    ///     but I have seen implementations of pipelines where it is the same.
-    /// - Returns: An array of tuples of noise values with length of batch size.
-    func generateImage2ImageLatentSamples(_ count: Int, rng: StableDiffusionRNG, stdev: Float, seed: UInt32, diagonalAndLatentNoiseIsSame: Bool = false) -> [(diagonal: MLShapedArray<Float32>, latentNoise: MLShapedArray<Float32>)] {
-        var sampleShape = unet.latentSampleShape
-        sampleShape[0] = 1
-
-        var random = randomSource(from: rng, seed: seed)
-        let samples = (0..<count).map { _ in
-            if diagonalAndLatentNoiseIsSame {
-                let noise = MLShapedArray<Float32>(
-                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev)))
-                return (noise, noise)
-            } else {
-                return (MLShapedArray<Float32>(
-                    converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))),
-                        MLShapedArray<Float32>(
-                            converting: random.normalShapedArray(sampleShape, mean: 0.0, stdev: Double(stdev))))
+        if let image = config.startingImage, config.mode == .imageToImage {
+            guard let encoder else {
+                throw Error.startingImageProvidedWithoutEncoder
             }
+            let latent = try encoder.encode(image, scaleFactor: config.encoderScaleFactor, random: &random)
+            return scheduler.addNoise(originalSample: latent, noise: samples, strength: config.strength)
         }
         return samples
     }
@@ -319,16 +274,14 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return MLShapedArray<Float32>(scalars: resultScalars, shape: shape)
     }
 
-    func decodeToImages(_ latents: [MLShapedArray<Float32>],
-                        disableSafety: Bool) throws -> [CGImage?] {
-
-        let images = try decoder.decode(latents)
+    func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
+        let images = try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
         if reduceMemory {
             decoder.unloadResources()
         }
 
         // If safety is disabled return what was decoded
-        if disableSafety {
+        if config.disableSafety {
             return images
         }
 
@@ -360,11 +313,12 @@ extension StableDiffusionPipeline {
         public let step: Int
         public let stepCount: Int
         public let currentLatentSamples: [MLShapedArray<Float32>]
-        public let isSafetyEnabled: Bool
+        public let configuration: Configuration
+        public var isSafetyEnabled: Bool {
+            pipeline.canSafetyCheck && !configuration.disableSafety
+        }
         public var currentImages: [CGImage?] {
-            try! pipeline.decodeToImages(
-                currentLatentSamples,
-                disableSafety: !isSafetyEnabled)
+            try! pipeline.decodeToImages(currentLatentSamples, configuration: configuration)
         }
     }
 }
