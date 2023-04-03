@@ -42,7 +42,7 @@ public struct Encoder: ResourceManaging {
     ///
     ///  - Parameters:
     ///    - image: Input image
-    ///    - scaleFactor
+    ///    - scaleFactor: scalar multiplier on latents before encoding image
     ///    - random
     ///  - Returns: The encoded latent space as MLShapedArray
     public func encode(

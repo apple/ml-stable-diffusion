@@ -35,6 +35,7 @@ public struct Decoder: ResourceManaging {
     ///
     ///  - Parameters:
     ///    - latents: Batch of latent samples to decode
+    ///    - scaleFactor: scalar divisor on latents before decoding
     ///  - Returns: decoded images
     public func decode(
         _ latents: [MLShapedArray<Float32>],
