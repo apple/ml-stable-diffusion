@@ -158,21 +158,32 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
 
 def quantize_weights_to_8bits(args):
     for model_name in [
-            "text_encoder", "vae_decoder", "vae_encoder", "unet", "unet_chunk1",
-            "unet_chunk2", "safety_checker"
+            "text_encoder", "vae_decoder", "vae_encoder", "unet", "unet_chunk1", "unet_chunk2", 
+            "control-unet", "control-unet_chunk1", "control-unet_chunk2", "safety_checker"
     ]:
         out_path = _get_out_path(args, model_name)
-        if os.path.exists(out_path):
-            logger.info(f"Quantizing {model_name}")
-            mlmodel = ct.models.MLModel(out_path,
-                                        compute_units=ct.ComputeUnit.CPU_ONLY)
-            mlmodel = ct.compression_utils.affine_quantize_weights(
-                mlmodel, mode="linear")
-            mlmodel.save(out_path)
-            logger.info("Done")
-        else:
-            logger.info(
-                f"Skipped quantizing {model_name} (Not found at {out_path})")
+        _quantize_and_save_8bits_model(out_path, model_name)
+
+    if args.convert_controlnet:
+        for controlnet_model_version in args.convert_controlnet:
+            controlnet_model_name = controlnet_model_version.replace("/", "_")
+            fname = f"ControlNet_{controlnet_model_name}.mlpackage"
+            out_path = os.path.join(args.o, fname)
+            _quantize_and_save_8bits_model(out_path, controlnet_model_name)
+            
+
+def _quantize_and_save_8bits_model(out_path, model_name):
+    if os.path.exists(out_path):
+        logger.info(f"Quantizing {model_name}")
+        mlmodel = ct.models.MLModel(out_path,
+                                    compute_units=ct.ComputeUnit.CPU_ONLY)
+        mlmodel = ct.compression_utils.affine_quantize_weights(
+            mlmodel, mode="linear")
+        mlmodel.save(out_path)
+        logger.info("Done")
+    else:
+        logger.info(
+            f"Skipped quantizing {model_name} (Not found at {out_path})")
 
 
 def _compile_coreml_model(source_model_path, output_dir, final_name):
