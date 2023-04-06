@@ -24,6 +24,8 @@ from python_coreml_stable_diffusion import chunk_mlprogram
 import requests
 import shutil
 import time
+import re
+import pathlib
 
 import torch
 import torch.nn as nn
@@ -210,6 +212,9 @@ def bundle_resources_for_swift_cli(args):
                                      ("unet", "Unet"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
+                                     ("control-unet", "ControledUnet"),
+                                     ("control-unet_chunk1", "ControledUnetChunk1"),
+                                     ("control-unet_chunk2", "ControledUnetChunk2"),
                                      ("safety_checker", "SafetyChecker")]:
         source_path = _get_out_path(args, source_name)
         if os.path.exists(source_path):
@@ -220,6 +225,23 @@ def bundle_resources_for_swift_cli(args):
             logger.warning(
                 f"{source_path} not found, skipping compilation to {target_name}.mlmodelc"
             )
+            
+    if args.convert_controlnet:
+        for controlnet_model_version in args.convert_controlnet:
+            controlnet_model_name = controlnet_model_version.replace("/", "_")
+            fname = f"ControlNet_{controlnet_model_name}.mlpackage"
+            source_path = os.path.join(args.o, fname)
+            controlnet_dir = os.path.join(resources_dir, "controlnet")
+            target_name = "".join([word.title() for word in re.split('_|-', controlnet_model_name)])
+
+            if os.path.exists(source_path):
+                target_path = _compile_coreml_model(source_path, controlnet_dir,
+                                                    target_name)
+                logger.info(f"Compiled {source_path} to {target_path}")
+            else:
+                logger.warning(
+                    f"{source_path} not found, skipping compilation to {target_name}.mlmodelc"
+                )
 
     # Fetch and save vocabulary JSON file for text tokenizer
     logger.info("Downloading and saving tokenizer vocab.json")

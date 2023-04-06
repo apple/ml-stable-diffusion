@@ -17,6 +17,10 @@ public extension StableDiffusionPipeline {
         public let safetyCheckerURL: URL
         public let vocabURL: URL
         public let mergesURL: URL
+        public let controlNetDirURL: URL
+        public let controledUnetURL: URL
+        public let controledUnetChunk1URL: URL
+        public let controledUnetChunk2URL: URL
 
         public init(resourcesAt baseURL: URL) {
             textEncoderURL = baseURL.appending(path: "TextEncoder.mlmodelc")
@@ -27,6 +31,10 @@ public extension StableDiffusionPipeline {
             safetyCheckerURL = baseURL.appending(path: "SafetyChecker.mlmodelc")
             vocabURL = baseURL.appending(path: "vocab.json")
             mergesURL = baseURL.appending(path: "merges.txt")
+            controlNetDirURL = baseURL.appending(path: "Controlnet")
+            controledUnetURL = baseURL.appending(path: "ControledUnet.mlmodelc")
+            controledUnetChunk1URL = baseURL.appending(path: "ControledUnetChunk1.mlmodelc")
+            controledUnetChunk2URL = baseURL.appending(path: "ControledUnetChunk2.mlmodelc")
         }
     }
 
@@ -36,12 +44,14 @@ public extension StableDiffusionPipeline {
     /// - Parameters:
     ///    - baseURL: URL pointing to directory holding all model
     ///               and tokenization resources
+    ///   - controlNetModelNames: Specify ControlNet models to use in generation
     ///   - configuration: The configuration to load model resources with
     ///   - disableSafety: Load time disable of safety to save memory
     ///   - reduceMemory: Setup pipeline in reduced memory mode
     /// - Returns:
     ///  Pipeline ready for image generation if all  necessary resources loaded
     init(resourcesAt baseURL: URL,
+         controlNet controlNetModelNames: [String],
          configuration config: MLModelConfiguration = .init(),
          disableSafety: Bool = false,
          reduceMemory: Bool = false) throws {
@@ -54,15 +64,38 @@ public extension StableDiffusionPipeline {
         let textEncoder = TextEncoder(tokenizer: tokenizer,
                                       modelAt: urls.textEncoderURL,
                                       configuration: config)
+        
+        // ControlNet model
+        var controlNet: ControlNet? = nil
+        let controlNetURLs = controlNetModelNames.map { model in
+            let fileName = model + ".mlmodelc"
+            return urls.controlNetDirURL.appending(path: fileName)
+        }
+        if (!controlNetURLs.isEmpty) {
+            controlNet = ControlNet(modelAt: controlNetURLs, configuration: config)
+        }
 
         // Unet model
         let unet: Unet
-        if FileManager.default.fileExists(atPath: urls.unetChunk1URL.path) &&
-            FileManager.default.fileExists(atPath: urls.unetChunk2URL.path) {
-            unet = Unet(chunksAt: [urls.unetChunk1URL, urls.unetChunk2URL],
+        let unetURL: URL, unetChunk1URL: URL, unetChunk2URL: URL
+        
+        // if ControlNet available, Unet supports additional inputs from ControlNet
+        if (controlNet == nil) {
+            unetURL = urls.unetURL
+            unetChunk1URL = urls.unetChunk1URL
+            unetChunk2URL = urls.unetChunk2URL
+        } else {
+            unetURL = urls.controledUnetURL
+            unetChunk1URL = urls.controledUnetChunk1URL
+            unetChunk2URL = urls.controledUnetChunk2URL
+        }
+        
+        if FileManager.default.fileExists(atPath: unetChunk1URL.path) &&
+            FileManager.default.fileExists(atPath: unetChunk2URL.path) {
+            unet = Unet(chunksAt: [unetChunk1URL, unetChunk2URL],
                         configuration: config)
         } else {
-            unet = Unet(modelAt: urls.unetURL, configuration: config)
+            unet = Unet(modelAt: unetURL, configuration: config)
         }
 
         // Image Decoder
@@ -79,6 +112,7 @@ public extension StableDiffusionPipeline {
         self.init(textEncoder: textEncoder,
                   unet: unet,
                   decoder: decoder,
+                  controlNet: controlNet,
                   safetyChecker: safetyChecker,
                   reduceMemory: reduceMemory)
     }

@@ -568,7 +568,7 @@ def main(args):
     if args.controlnet:
         controlnet_cond = []
         for i, _ in enumerate(args.controlnet):
-            image_path = args.controlnet_input[i]
+            image_path = args.controlnet_inputs[i]
             image = prepare_controlnet_cond(image_path, coreml_pipe.height, coreml_pipe.width)
             controlnet_cond.append(image)
     else:
@@ -643,7 +643,7 @@ if __name__ == "__main__":
         help=("Enables ControlNet and use control-unet instead of unet for additional inputs. "
             "For Multi-Controlnet, provide the model names separated by spaces."))
     parser.add_argument(
-        "--controlnet-input",
+        "--controlnet-inputs",
         nargs="*", 
         type=str,
         help=("Image paths for ControlNet inputs. "

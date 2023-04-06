@@ -7,6 +7,7 @@ import CoreML
 import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
+import CoreImage
 
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
@@ -61,6 +62,12 @@ struct StableDiffusionSample: ParsableCommand {
 
     @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
     var scheduler: SchedulerOption = .pndm
+    
+    @Option(parsing: .upToNextOption, help: "ControlNet models used in image generation")
+    var controlnet: [String] = []
+    
+    @Option(parsing: .upToNextOption, help: "image for each controlNet model (corresponding to the same order as --controlnet)")
+    var controlnetInputs: [String] = []
 
     @Flag(help: "Disable safety checking")
     var disableSafety: Bool = false
@@ -80,10 +87,21 @@ struct StableDiffusionSample: ParsableCommand {
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
         let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL,
+                                                   controlNet: controlnet,
                                                    configuration: config,
                                                    disableSafety: disableSafety,
                                                    reduceMemory: reduceMemory)
         try pipeline.loadResources()
+        
+        // convert image for ControlNet into MLShapedArray when controlNet available
+        let controlNetInputs: [MLShapedArray<Float32>]
+        if let imageShape = pipeline.controlNetImageShape {
+            controlNetInputs = try controlnetInputs.map { imagePath in
+                return try convertImageForControlNet(imagePath: imagePath, shape: imageShape)
+            }
+        } else {
+            controlNetInputs = []
+        }
 
         log("Sampling ...\n")
         let sampleTimer = SampleTimer()
@@ -96,6 +114,7 @@ struct StableDiffusionSample: ParsableCommand {
             stepCount: stepCount,
             seed: seed,
             guidanceScale: guidanceScale,
+            controlNetInputs: controlNetInputs,
             scheduler: scheduler.stableDiffusionScheduler
         ) { progress in
             sampleTimer.stop()
@@ -107,6 +126,64 @@ struct StableDiffusionSample: ParsableCommand {
         }
 
         _ = try saveImages(images, logNames: true)
+    }
+    
+    func convertImageForControlNet(imagePath: String, shape: [Int]) throws -> MLShapedArray<Float32> {
+        
+        var imageShape = shape
+        imageShape[0] = 1
+        let imageSize = CGSize(width: imageShape[3], height: imageShape[2])
+        
+        // imagePath -> CIImage
+        let imageURL = URL(filePath: imagePath)
+        let imageData = try Data(contentsOf: imageURL)
+        let image = CIImage(data: imageData)!
+        
+        // scale a short side to 512
+        let scaleX = imageSize.width / image.extent.size.width
+        let scaleY = imageSize.height / image.extent.size.height
+        let scale = max(scaleX, scaleY)
+        let scaledImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        
+        // center cropping
+        let originX = (scaledImage.extent.size.width - imageSize.width) / 2
+        let originY = (scaledImage.extent.size.height - imageSize.height) / 2
+        let croppedImage = scaledImage.cropped(to: CGRect(x: originX, y: originY, width: imageSize.width, height: imageSize.height))
+        
+        // CIImage -> CVPixelBuffer
+        var pixelBuffer: CVPixelBuffer?
+        let pixelBufferAttrs = [kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue,
+                     kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue] as CFDictionary
+        CVPixelBufferCreate(kCFAllocatorDefault, Int(imageSize.width), Int(imageSize.height), kCVPixelFormatType_32BGRA, pixelBufferAttrs, &pixelBuffer)
+        let context = CIContext()
+        context.render(croppedImage, to: pixelBuffer!)
+        
+        // CVPixelBuffer -> MLShapedArray
+        let mlMultiArray = try MLMultiArray(shape: imageShape as [NSNumber], dataType: .float32)
+        
+        let imagePixelbuffer = pixelBuffer!
+        CVPixelBufferLockBaseAddress(imagePixelbuffer, CVPixelBufferLockFlags(rawValue: 0))
+        let baseAddress = CVPixelBufferGetBaseAddress(imagePixelbuffer)!.assumingMemoryBound(to: UInt8.self)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(imagePixelbuffer)
+        
+        for y in 0..<Int(imageSize.height) {
+            for x in 0..<Int(imageSize.width) {
+                let pixel = baseAddress + (y * bytesPerRow) + (x * 4)
+                
+                let r = Float(pixel[0]) / 255.0
+                let g = Float(pixel[1]) / 255.0
+                let b = Float(pixel[2]) / 255.0
+                
+                mlMultiArray[[0, 0, y, x] as [NSNumber]] = NSNumber(value: r)
+                mlMultiArray[[0, 1, y, x] as [NSNumber]] = NSNumber(value: g)
+                mlMultiArray[[0, 2, y, x] as [NSNumber]] = NSNumber(value: b)
+            }
+        }
+        
+        return MLShapedArray(
+            concatenating: [MLShapedArray(mlMultiArray), MLShapedArray(mlMultiArray)],
+            alongAxis: 0
+        )
     }
 
     func handleProgress(
