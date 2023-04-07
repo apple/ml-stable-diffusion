@@ -228,6 +228,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
 
         if reduceMemory {
+            controlNet?.unloadResources()
             unet.unloadResources()
         }
 
