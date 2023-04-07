@@ -45,21 +45,6 @@ def _get_coreml_inputs(sample_inputs, args):
         ) for k, v in sample_inputs.items()
     ]
 
-# Simpler version of `DiagonalGaussianDistribution` with only needed calculations
-# as implemented in vae.py as part of the AutoencoderKL class
-# https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/vae.py#L312
-# coremltools-6.1 does not yet implement the randn operation with the option of setting a random seed
-class CoreMLDiagonalGaussianDistribution(object):
-    def __init__(self, parameters, noise):
-        self.parameters = parameters
-        self.noise = noise
-        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
-        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
-        self.std = torch.exp(0.5 * self.logvar)
-
-    def sample(self) -> torch.FloatTensor:
-        x = self.mean + self.std * self.noise
-        return x
 
 def compute_psnr(a, b):
     """ Compute Peak-Signal-to-Noise-Ratio across two numpy.ndarray objects
@@ -374,7 +359,7 @@ def convert_text_encoder(pipe, args):
 def modify_coremltools_torch_frontend_badbmm():
     """
     Modifies coremltools torch frontend for baddbmm to be robust to the `beta` argument being of non-float dtype:
-    e.g. https://github.com/huggingface/diffusers/blob/v0.8.1/src/diffusers/models/attention.py#L315 
+    e.g. https://github.com/huggingface/diffusers/blob/v0.8.1/src/diffusers/models/attention.py#L315
     """
     from coremltools.converters.mil import register_torch_op
     from coremltools.converters.mil.mil import Builder as mb
@@ -517,35 +502,19 @@ def convert_vae_encoder(pipe, args):
         raise RuntimeError(
             "convert_unet() deletes pipe.unet to save RAM. "
             "Please use convert_vae_encoder() before convert_unet()")
-
-    sample_shape = (
+    
+    height = (args.latent_h or pipe.unet.config.sample_size) * 8
+    width = (args.latent_w or pipe.unet.config.sample_size) * 8
+    
+    z_shape = (
         1,  # B
         3,  # C (RGB range from -1 to 1)
-        (args.latent_h or pipe.unet.config.sample_size) * 8,  # H
-        (args.latent_w or pipe.unet.config.sample_size) * 8,  # w
+        height,  # H
+        width,  # w
     )
-    
-    noise_shape = (
-        1,  # B
-        4,  # C
-        pipe.unet.config.sample_size,  # H
-        pipe.unet.config.sample_size,  # w
-    )
-
-    float_value_shape = (
-        1,
-        1,
-    )
-
-    sqrt_alphas_cumprod_torch_shape = torch.tensor([[0.2,]])
-    sqrt_one_minus_alphas_cumprod_torch_shape = torch.tensor([[0.8,]])
 
     sample_vae_encoder_inputs = {
-        "sample": torch.rand(*sample_shape, dtype=torch.float16),
-        "diagonal_noise": torch.rand(*noise_shape, dtype=torch.float16),
-        "noise": torch.rand(*noise_shape, dtype=torch.float16),
-        "sqrt_alphas_cumprod": torch.rand(*float_value_shape, dtype=torch.float16),
-        "sqrt_one_minus_alphas_cumprod": torch.rand(*float_value_shape, dtype=torch.float16),
+        "z": torch.rand(*z_shape, dtype=torch.float16)
     }
 
     class VAEEncoder(nn.Module):
@@ -555,51 +524,21 @@ def convert_vae_encoder(pipe, args):
         def __init__(self):
             super().__init__()
             self.quant_conv = pipe.vae.quant_conv
-            self.alphas_cumprod = pipe.scheduler.alphas_cumprod
             self.encoder = pipe.vae.encoder
 
-        # Because CoreMLTools does not support the torch.randn op, we pass in both
-        # the diagonal Noise for the `DiagonalGaussianDistribution` operation and
-        # the noise tensor combined with precalculated `sqrt_alphas_cumprod` and `sqrt_one_minus_alphas_cumprod`
-        # for faster computation.
-        def forward(self, sample, diagonal_noise, noise, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod):
-            h = self.encoder(sample)
-            moments = self.quant_conv(h)
-            posterior = CoreMLDiagonalGaussianDistribution(moments, diagonal_noise)
-            posteriorSample = posterior.sample()
-            
-            # Add the scaling operation and the latent noise for faster computation
-            init_latents = 0.18215 * posteriorSample
-            result = self.add_noise(init_latents, noise, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod)
-            return result
-        
-        def add_noise(
-            self,
-            original_samples: torch.FloatTensor,
-            noise: torch.FloatTensor,
-            sqrt_alphas_cumprod: torch.FloatTensor,
-            sqrt_one_minus_alphas_cumprod: torch.FloatTensor
-        ) -> torch.FloatTensor:
-            noisy_samples = sqrt_alphas_cumprod * original_samples + sqrt_one_minus_alphas_cumprod * noise
-            return noisy_samples
-         
+        def forward(self, z):
+            return self.quant_conv(self.encoder(z))
 
     baseline_encoder = VAEEncoder().eval()
 
     # No optimization needed for the VAE Encoder as it is a pure ConvNet
     traced_vae_encoder = torch.jit.trace(
-        baseline_encoder, (
-            sample_vae_encoder_inputs["sample"].to(torch.float32),
-            sample_vae_encoder_inputs["diagonal_noise"].to(torch.float32),
-            sample_vae_encoder_inputs["noise"].to(torch.float32),
-            sqrt_alphas_cumprod_torch_shape.to(torch.float32),
-            sqrt_one_minus_alphas_cumprod_torch_shape.to(torch.float32)
-        ))
+        baseline_encoder, (sample_vae_encoder_inputs["z"].to(torch.float32), ))
 
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
-        ["latent_dist"], args)
+        ["latent"], args)
 
     # Set model metadata
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
@@ -610,20 +549,11 @@ def convert_vae_encoder(pipe, args):
         "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
-    coreml_vae_encoder.input_description["sample"] = \
-        "An image of the correct size to create the latent space with, image2image and in-painting."
-    coreml_vae_encoder.input_description["diagonal_noise"] = \
-        "Latent noise for `DiagonalGaussianDistribution` operation."
-    coreml_vae_encoder.input_description["noise"] = \
-        "Latent noise for use with strength parameter of image2image"
-    coreml_vae_encoder.input_description["sqrt_alphas_cumprod"] = \
-        "Precalculated `sqrt_alphas_cumprod` value based on strength and the current schedular's alphasCumprod values"
-    coreml_vae_encoder.input_description["sqrt_one_minus_alphas_cumprod"] = \
-        "Precalculated `sqrt_one_minus_alphas_cumprod` value based on strength and the current schedular's alphasCumprod values"
+    coreml_vae_encoder.input_description["z"] = \
+        "The input image to base the initial latents on normalized to range [-1, 1]"
 
     # Set the output descriptions
-    coreml_vae_encoder.output_description[
-        "latent_dist"] = "The latent embeddings from the unet model from the input image."
+    coreml_vae_encoder.output_description["latent"] = "The latent embeddings from the unet model from the input image."
 
     _save_mlpackage(coreml_vae_encoder, out_path)
 
@@ -632,24 +562,12 @@ def convert_vae_encoder(pipe, args):
     # Parity check PyTorch vs CoreML
     if args.check_output_correctness:
         baseline_out = baseline_encoder(
-            sample=sample_vae_encoder_inputs["sample"].to(torch.float32),
-            diagonal_noise=sample_vae_encoder_inputs["diagonal_noise"].to(torch.float32),
-            noise=sample_vae_encoder_inputs["noise"].to(torch.float32),
-            sqrt_alphas_cumprod=sqrt_alphas_cumprod_torch_shape,
-            sqrt_one_minus_alphas_cumprod=sqrt_one_minus_alphas_cumprod_torch_shape,
-            ).numpy(),
-
+            z=sample_vae_encoder_inputs["z"].to(torch.float32)).numpy()
         coreml_out = list(
             coreml_vae_encoder.predict(
-                {
-                    "sample": sample_vae_encoder_inputs["sample"].numpy(),
-                    "diagonal_noise": sample_vae_encoder_inputs["diagonal_noise"].numpy(),
-                    "noise": sample_vae_encoder_inputs["noise"].numpy(),
-                    "sqrt_alphas_cumprod": sqrt_alphas_cumprod_torch_shape.numpy(),
-                    "sqrt_one_minus_alphas_cumprod": sqrt_one_minus_alphas_cumprod_torch_shape.numpy()
-                }).values())
-
-        report_correctness(baseline_out[0], coreml_out[0],
+                {k: v.numpy()
+                 for k, v in sample_vae_encoder_inputs.items()}).values())[0]
+        report_correctness(baseline_out, coreml_out,
                            "vae_encoder baseline PyTorch to baseline CoreML")
 
     del traced_vae_encoder, pipe.vae.encoder, coreml_vae_encoder
@@ -685,8 +603,8 @@ def convert_unet(pipe, args):
         sample_shape = (
             batch_size,                    # B
             pipe.unet.config.in_channels,  # C
-            pipe.unet.config.sample_size,  # H
-            pipe.unet.config.sample_size,  # W
+            args.latent_h or pipe.unet.config.sample_size,  # H
+            args.latent_w or pipe.unet.config.sample_size,  # W
         )
 
         if not hasattr(pipe, "text_encoder"):
@@ -859,8 +777,8 @@ def convert_safety_checker(pipe, args):
 
     sample_image = np.random.randn(
         1,  # B
-        pipe.vae.config.sample_size,  # H
-        pipe.vae.config.sample_size,  # w
+        args.latent_h or pipe.vae.config.sample_size,  # H
+        args.latent_w or pipe.vae.config.sample_size,  # w
         3  # C
     ).astype(np.float32)
 
@@ -1208,7 +1126,7 @@ def main(args):
         logger.info("Converting vae_decoder")
         convert_vae_decoder(pipe, args)
         logger.info("Converted vae_decoder")
-        
+
     if args.convert_vae_encoder:
         logger.info("Converting vae_encoder")
         convert_vae_encoder(pipe, args)

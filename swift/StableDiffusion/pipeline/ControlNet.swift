@@ -37,15 +37,19 @@ public struct ControlNet: ResourceManaging {
         }
     }
     
-    var inputImageDescription: MLFeatureDescription {
-        try! models.first!.perform { model in
-            model.modelDescription.inputDescriptionsByName["controlnet_cond"]!
+    var inputImageDescriptions: [MLFeatureDescription] {
+        models.map { model in
+            try! model.perform {
+                $0.modelDescription.inputDescriptionsByName["controlnet_cond"]!
+            }
         }
     }
     
     /// The expected shape of the models image input
-    public var inputImageShape: [Int] {
-        inputImageDescription.multiArrayConstraint!.shape.map { $0.intValue }
+    public var inputImageShapes: [[Int]] {
+        inputImageDescriptions.map { desc in
+            desc.multiArrayConstraint!.shape.map { $0.intValue }
+        }
     }
     
     /// Calculate additional inputs for Unet to generate intended image following provided images

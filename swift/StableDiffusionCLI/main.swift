@@ -7,6 +7,7 @@ import CoreML
 import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
+import Cocoa
 import CoreImage
 
 @available(iOS 16.2, macOS 13.1, *)
@@ -33,6 +34,12 @@ struct StableDiffusionSample: ParsableCommand {
         )
     )
     var resourcePath: String = "./"
+    
+    @Option(help: "Path to starting image.")
+    var image: String? = nil
+    
+    @Option(help: "Strength for image2image.")
+    var strength: Float = 0.5
 
     @Option(help: "Number of images to sample / generate")
     var imageCount: Int = 1
@@ -52,7 +59,7 @@ struct StableDiffusionSample: ParsableCommand {
     var outputPath: String = "./"
 
     @Option(help: "Random seed")
-    var seed: UInt32 = 93
+    var seed: UInt32 = UInt32.random(in: 0...UInt32.max)
 
     @Option(help: "Controls the influence of the text prompt on sampling process (0=random images)")
     var guidanceScale: Float = 7.5
@@ -62,6 +69,9 @@ struct StableDiffusionSample: ParsableCommand {
 
     @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
     var scheduler: SchedulerOption = .pndm
+
+    @Option(help: "Random number generator to use, one of {numpy, torch}")
+    var rng: RNGOption = .numpy
     
     @Option(parsing: .upToNextOption, help: "ControlNet models used in image generation")
     var controlnet: [String] = []
@@ -93,11 +103,29 @@ struct StableDiffusionSample: ParsableCommand {
                                                    reduceMemory: reduceMemory)
         try pipeline.loadResources()
         
-        // convert image for ControlNet into MLShapedArray when controlNet available
-        let controlNetInputs: [MLShapedArray<Float32>]
-        if let imageShape = pipeline.controlNetImageShape {
+        let startingImage: CGImage?
+        if let image {
+            let imageURL = URL(filePath: image)
+            do {
+                startingImage = try convertImageToCGImage(imageURL: imageURL)
+            } catch let error {
+                throw RunError.resources("Starting image not found \(imageURL), error: \(error)")
+            }
+            
+        } else {
+            startingImage = nil
+        }
+        
+        // convert image for ControlNet into CGImage when controlNet available
+        let controlNetInputs: [CGImage]
+        if !controlnet.isEmpty {
             controlNetInputs = try controlnetInputs.map { imagePath in
-                return try convertImageForControlNet(imagePath: imagePath, shape: imageShape)
+                let imageURL = URL(filePath: imagePath)
+                do {
+                    return try convertImageToCGImage(imageURL: imageURL)
+                } catch let error {
+                    throw RunError.resources("Image for ControlNet not found \(imageURL), error: \(error)")
+                }
             }
         } else {
             controlNetInputs = []
@@ -107,83 +135,42 @@ struct StableDiffusionSample: ParsableCommand {
         let sampleTimer = SampleTimer()
         sampleTimer.start()
 
+        var pipelineConfig = StableDiffusionPipeline.Configuration(prompt: prompt)
+        
+        pipelineConfig.negativePrompt = negativePrompt
+        pipelineConfig.startingImage = startingImage
+        pipelineConfig.strength = strength
+        pipelineConfig.imageCount = imageCount
+        pipelineConfig.stepCount = stepCount
+        pipelineConfig.seed = seed
+        pipelineConfig.controlNetInputs = controlNetInputs
+        pipelineConfig.guidanceScale = guidanceScale
+        pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
+        pipelineConfig.rngType = rng.stableDiffusionRNG
+        
         let images = try pipeline.generateImages(
-            prompt: prompt,
-            negativePrompt: negativePrompt,
-            imageCount: imageCount,
-            stepCount: stepCount,
-            seed: seed,
-            guidanceScale: guidanceScale,
-            controlNetInputs: controlNetInputs,
-            scheduler: scheduler.stableDiffusionScheduler
-        ) { progress in
-            sampleTimer.stop()
-            handleProgress(progress,sampleTimer)
-            if progress.stepCount != progress.step {
-                sampleTimer.start()
-            }
-            return true
-        }
+            configuration: pipelineConfig,
+            progressHandler: { progress in
+                sampleTimer.stop()
+                handleProgress(progress,sampleTimer)
+                if progress.stepCount != progress.step {
+                    sampleTimer.start()
+                }
+                return true
+            })
 
         _ = try saveImages(images, logNames: true)
     }
     
-    func convertImageForControlNet(imagePath: String, shape: [Int]) throws -> MLShapedArray<Float32> {
-        
-        var imageShape = shape
-        imageShape[0] = 1
-        let imageSize = CGSize(width: imageShape[3], height: imageShape[2])
-        
-        // imagePath -> CIImage
-        let imageURL = URL(filePath: imagePath)
+    func convertImageToCGImage(imageURL: URL) throws -> CGImage {
         let imageData = try Data(contentsOf: imageURL)
-        let image = CIImage(data: imageData)!
-        
-        // scale a short side to 512
-        let scaleX = imageSize.width / image.extent.size.width
-        let scaleY = imageSize.height / image.extent.size.height
-        let scale = max(scaleX, scaleY)
-        let scaledImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        
-        // center cropping
-        let originX = (scaledImage.extent.size.width - imageSize.width) / 2
-        let originY = (scaledImage.extent.size.height - imageSize.height) / 2
-        let croppedImage = scaledImage.cropped(to: CGRect(x: originX, y: originY, width: imageSize.width, height: imageSize.height))
-        
-        // CIImage -> CVPixelBuffer
-        var pixelBuffer: CVPixelBuffer?
-        let pixelBufferAttrs = [kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue,
-                     kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue] as CFDictionary
-        CVPixelBufferCreate(kCFAllocatorDefault, Int(imageSize.width), Int(imageSize.height), kCVPixelFormatType_32BGRA, pixelBufferAttrs, &pixelBuffer)
-        let context = CIContext()
-        context.render(croppedImage, to: pixelBuffer!)
-        
-        // CVPixelBuffer -> MLShapedArray
-        let mlMultiArray = try MLMultiArray(shape: imageShape as [NSNumber], dataType: .float32)
-        
-        let imagePixelbuffer = pixelBuffer!
-        CVPixelBufferLockBaseAddress(imagePixelbuffer, CVPixelBufferLockFlags(rawValue: 0))
-        let baseAddress = CVPixelBufferGetBaseAddress(imagePixelbuffer)!.assumingMemoryBound(to: UInt8.self)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(imagePixelbuffer)
-        
-        for y in 0..<Int(imageSize.height) {
-            for x in 0..<Int(imageSize.width) {
-                let pixel = baseAddress + (y * bytesPerRow) + (x * 4)
-                
-                let r = Float(pixel[0]) / 255.0
-                let g = Float(pixel[1]) / 255.0
-                let b = Float(pixel[2]) / 255.0
-                
-                mlMultiArray[[0, 0, y, x] as [NSNumber]] = NSNumber(value: r)
-                mlMultiArray[[0, 1, y, x] as [NSNumber]] = NSNumber(value: g)
-                mlMultiArray[[0, 2, y, x] as [NSNumber]] = NSNumber(value: b)
-            }
+        guard
+            let nsImage = NSImage(data: imageData),
+            let loadedImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
+            throw RunError.resources("Image not available \(resourcePath)")
         }
-        
-        return MLShapedArray(
-            concatenating: [MLShapedArray(mlMultiArray), MLShapedArray(mlMultiArray)],
-            alongAxis: 0
-        )
+        return loadedImage
     }
 
     func handleProgress(
@@ -245,6 +232,10 @@ struct StableDiffusionSample: ParsableCommand {
         if imageCount != 1 {
             name += ".\(sample)"
         }
+        
+        if image != nil {
+            name += ".str\(Int(strength * 100))"
+        }
 
         name += ".\(seed)"
 
@@ -287,6 +278,17 @@ enum SchedulerOption: String, ExpressibleByArgument {
         switch self {
         case .pndm: return .pndmScheduler
         case .dpmpp: return .dpmSolverMultistepScheduler
+        }
+    }
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+enum RNGOption: String, ExpressibleByArgument {
+    case numpy, torch
+    var stableDiffusionRNG: StableDiffusionRNG {
+        switch self {
+        case .numpy: return .numpyRNG
+        case .torch: return .torchRNG
         }
     }
 }
