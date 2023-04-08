@@ -73,10 +73,16 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Random number generator to use, one of {numpy, torch}")
     var rng: RNGOption = .numpy
     
-    @Option(parsing: .upToNextOption, help: "ControlNet models used in image generation")
+    @Option(
+        parsing: .upToNextOption,
+        help: "ControlNet models used in image generation (enter file names in Resources/controlnet without extension)"
+    )
     var controlnet: [String] = []
     
-    @Option(parsing: .upToNextOption, help: "image for each controlNet model (corresponding to the same order as --controlnet)")
+    @Option(
+        parsing: .upToNextOption,
+        help: "image for each controlNet model (corresponding to the same order as --controlnet)"
+    )
     var controlnetInputs: [String] = []
 
     @Flag(help: "Disable safety checking")
