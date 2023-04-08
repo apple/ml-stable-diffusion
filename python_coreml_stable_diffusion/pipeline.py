@@ -73,8 +73,6 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             feature_extractor=feature_extractor,
         )
 
-        safety_checker = None
-
         if safety_checker is None:
             # Reproduce original warning:
             # https://github.com/huggingface/diffusers/blob/v0.9.0/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py#L119
