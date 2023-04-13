@@ -387,7 +387,7 @@ def convert_vae_decoder(pipe, args):
 
     z_shape = (
         1,  # B
-        pipe.vae.latent_channels,  # C
+        pipe.vae.config.latent_channels,  # C
         args.latent_h or pipe.unet.config.sample_size,  # H
         args.latent_w or pipe.unet.config.sample_size,  # w
     )
