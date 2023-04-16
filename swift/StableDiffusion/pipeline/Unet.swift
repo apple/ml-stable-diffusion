@@ -93,8 +93,10 @@ public struct Unet: ResourceManaging {
                 "timestep" : MLMultiArray(t),
                 "encoder_hidden_states": MLMultiArray(hiddenStates)
             ]
-            additionalResiduals?[$0.offset].forEach { (k, v) in
-                dict[k] = MLMultiArray(v)
+            if let residuals = additionalResiduals?[$0.offset] {
+                for (k, v) in residuals {
+                    dict[k] = MLMultiArray(v)
+                }
             }
             return try MLDictionaryFeatureProvider(dictionary: dict)
         }

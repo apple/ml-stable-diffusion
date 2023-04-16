@@ -208,9 +208,9 @@ def bundle_resources_for_swift_cli(args):
                                      ("unet", "Unet"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
-                                     ("control-unet", "ControledUnet"),
-                                     ("control-unet_chunk1", "ControledUnetChunk1"),
-                                     ("control-unet_chunk2", "ControledUnetChunk2"),
+                                     ("control-unet", "ControlledUnet"),
+                                     ("control-unet_chunk1", "ControlledUnetChunk1"),
+                                     ("control-unet_chunk2", "ControlledUnetChunk2"),
                                      ("safety_checker", "SafetyChecker")]:
         source_path = _get_out_path(args, source_name)
         if os.path.exists(source_path):
@@ -952,6 +952,11 @@ def convert_controlnet(pipe, args):
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
+
+    if args.model_version != "runwayml/stable-diffusion-v1-5":
+        logger.warning(
+            "The original ControlNet models were trained using Stable Diffusion v1.5. "
+            "It is possible that the converted model may not be compatible with controlnet.")
 
     for i, controlnet_model_version in enumerate(args.convert_controlnet):
         controlnet_model_name = controlnet_model_version.replace("/", "_")

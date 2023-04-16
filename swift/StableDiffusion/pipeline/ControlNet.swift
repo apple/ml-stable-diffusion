@@ -69,7 +69,7 @@ public struct ControlNet: ResourceManaging {
         // Match time step batch dimension to the model / latent samples
         let t = MLShapedArray(scalars: [Float(timeStep), Float(timeStep)], shape: [2])
         
-        var currentOutputs: [[String: MLMultiArray]] = []
+        var outputs: [[String: MLShapedArray<Float32>]] = []
         
         for (modelIndex, model) in models.enumerated() {
             let inputs = try latents.map { latent in
@@ -90,45 +90,33 @@ public struct ControlNet: ResourceManaging {
             
             for n in 0..<results.count {
                 let result = results.features(at: n)
-                if currentOutputs.count < results.count {
-                    let initOutput = result.featureNames.reduce(into: [String: MLMultiArray]()) { output, k in
-                        output[k] = MLMultiArray(
+                if outputs.count < results.count {
+                    let initOutput = result.featureNames.reduce(into: [String: MLShapedArray<Float32>]()) { output, k in
+                        let multiArray = MLMultiArray(
                             concatenating: [result.featureValue(for: k)!.multiArrayValue!],
                             axis: 0,
                             dataType: .float32
                         )
+                        output[k] = MLShapedArray(multiArray)
                     }
-                    currentOutputs.append(initOutput)
+                    outputs.append(initOutput)
                 } else {
-                    var currentOutput = currentOutputs[n]
+                    var currentOutput = outputs[n]
                     for k in result.featureNames {
-                        let newValue = result.featureValue(for: k)!
-                        let currentValue = currentOutput[k]!
-                        let multiArray = MLMultiArray(
-                            concatenating: [newValue.multiArrayValue!],
+                        let newValue = MLMultiArray(
+                            concatenating: [result.featureValue(for: k)!.multiArrayValue!],
                             axis: 0,
                             dataType: .float32
                         )
-                        for i in 0..<multiArray.count {
-                            currentValue[i] = NSNumber(value: currentValue[i].floatValue + multiArray[i].floatValue)
+                        let currentValue = MLMultiArray(currentOutput[k]!)
+                        for i in 0..<newValue.count {
+                            currentValue[i] = NSNumber(value: currentValue[i].floatValue + newValue[i].floatValue)
                         }
-                        currentOutput[k] = currentValue
+                        currentOutput[k] = MLShapedArray(currentValue)
                     }
-                    currentOutputs[n] = currentOutput
+                    outputs[n] = currentOutput
                 }
             }
-        }
-        
-        var outputs: [[String: MLShapedArray<Float32>]] = []
-        let batchCount = currentOutputs.count
-        
-        for _ in 0..<batchCount {
-            let output = currentOutputs.remove(at: 0)
-            var newOutput: [String: MLShapedArray<Float32>] = [:]
-            for (k, v) in output {
-                newOutput[k] = MLShapedArray(v)
-            }
-            outputs.append(newOutput)
         }
         
         return outputs

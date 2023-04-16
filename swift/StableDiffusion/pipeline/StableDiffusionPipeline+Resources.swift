@@ -19,9 +19,9 @@ public extension StableDiffusionPipeline {
         public let vocabURL: URL
         public let mergesURL: URL
         public let controlNetDirURL: URL
-        public let controledUnetURL: URL
-        public let controledUnetChunk1URL: URL
-        public let controledUnetChunk2URL: URL
+        public let controlledUnetURL: URL
+        public let controlledUnetChunk1URL: URL
+        public let controlledUnetChunk2URL: URL
 
         public init(resourcesAt baseURL: URL) {
             textEncoderURL = baseURL.appending(path: "TextEncoder.mlmodelc")
@@ -33,10 +33,10 @@ public extension StableDiffusionPipeline {
             safetyCheckerURL = baseURL.appending(path: "SafetyChecker.mlmodelc")
             vocabURL = baseURL.appending(path: "vocab.json")
             mergesURL = baseURL.appending(path: "merges.txt")
-            controlNetDirURL = baseURL.appending(path: "Controlnet")
-            controledUnetURL = baseURL.appending(path: "ControledUnet.mlmodelc")
-            controledUnetChunk1URL = baseURL.appending(path: "ControledUnetChunk1.mlmodelc")
-            controledUnetChunk2URL = baseURL.appending(path: "ControledUnetChunk2.mlmodelc")
+            controlNetDirURL = baseURL.appending(path: "controlnet")
+            controlledUnetURL = baseURL.appending(path: "ControlledUnet.mlmodelc")
+            controlledUnetChunk1URL = baseURL.appending(path: "ControlledUnetChunk1.mlmodelc")
+            controlledUnetChunk2URL = baseURL.appending(path: "ControlledUnetChunk2.mlmodelc")
         }
     }
 
@@ -73,7 +73,7 @@ public extension StableDiffusionPipeline {
             let fileName = model + ".mlmodelc"
             return urls.controlNetDirURL.appending(path: fileName)
         }
-        if (!controlNetURLs.isEmpty) {
+        if !controlNetURLs.isEmpty {
             controlNet = ControlNet(modelAt: controlNetURLs, configuration: config)
         }
 
@@ -82,14 +82,14 @@ public extension StableDiffusionPipeline {
         let unetURL: URL, unetChunk1URL: URL, unetChunk2URL: URL
         
         // if ControlNet available, Unet supports additional inputs from ControlNet
-        if (controlNet == nil) {
+        if controlNet == nil {
             unetURL = urls.unetURL
             unetChunk1URL = urls.unetChunk1URL
             unetChunk2URL = urls.unetChunk2URL
         } else {
-            unetURL = urls.controledUnetURL
-            unetChunk1URL = urls.controledUnetChunk1URL
-            unetChunk2URL = urls.controledUnetChunk2URL
+            unetURL = urls.controlledUnetURL
+            unetChunk1URL = urls.controlledUnetChunk1URL
+            unetChunk2URL = urls.controlledUnetChunk2URL
         }
         
         if FileManager.default.fileExists(atPath: unetChunk1URL.path) &&

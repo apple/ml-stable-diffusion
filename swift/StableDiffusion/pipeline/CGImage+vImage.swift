@@ -63,56 +63,57 @@ extension CGImage {
         return cgImage
     }
     
-    public func plannerRGBShapedArray(minValue: Float, maxValue: Float) throws -> MLShapedArray<Float32> {
-        guard
-            var sourceFormat = vImage_CGImageFormat(cgImage: self),
-            var mediumFormat = vImage_CGImageFormat(
-                bitsPerComponent: 8 * MemoryLayout<UInt8>.size,
-                bitsPerPixel: 8 * MemoryLayout<UInt8>.size * 4,
-                colorSpace: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.first.rawValue)),
-            let width = vImagePixelCount(exactly: self.width),
-            let height = vImagePixelCount(exactly: self.height)
-        else {
-            throw ShapedArrayError.incorrectFormatsConvertingToShapedArray
-        }
-        
-        var sourceImageBuffer = try vImage_Buffer(cgImage: self)
-        
-        var mediumDesination = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: mediumFormat.bitsPerPixel)
-        
-        let converter = vImageConverter_CreateWithCGImageFormat(
-            &sourceFormat,
-            &mediumFormat,
-            nil,
-            vImage_Flags(kvImagePrintDiagnosticsToConsole),
-            nil)
-        
-        guard let converter = converter?.takeRetainedValue() else {
-            throw ShapedArrayError.vImageConverterNotInitialized
-        }
-        
-        vImageConvert_AnyToAny(converter, &sourceImageBuffer, &mediumDesination, nil, vImage_Flags(kvImagePrintDiagnosticsToConsole))
-        
-        var destinationA = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
-        var destinationR = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
-        var destinationG = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
-        var destinationB = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
-        
-        var minFloat: [Float] = Array(repeating: minValue, count: 4)
-        var maxFloat: [Float] = Array(repeating: maxValue, count: 4)
-        
-        vImageConvert_ARGB8888toPlanarF(&mediumDesination, &destinationA, &destinationR, &destinationG, &destinationB, &maxFloat, &minFloat, .zero)
-       
-        let redData = Data(bytes: destinationR.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-        let greenData = Data(bytes: destinationG.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-        let blueData = Data(bytes: destinationB.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-        
-        let imageData = redData + greenData + blueData
+    public func plannerRGBShapedArray(minValue: Float, maxValue: Float)
+        throws -> MLShapedArray<Float32> {
+            guard
+                var sourceFormat = vImage_CGImageFormat(cgImage: self),
+                var mediumFormat = vImage_CGImageFormat(
+                    bitsPerComponent: 8 * MemoryLayout<UInt8>.size,
+                    bitsPerPixel: 8 * MemoryLayout<UInt8>.size * 4,
+                    colorSpace: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.first.rawValue)),
+                let width = vImagePixelCount(exactly: self.width),
+                let height = vImagePixelCount(exactly: self.height)
+            else {
+                throw ShapedArrayError.incorrectFormatsConvertingToShapedArray
+            }
+            
+            var sourceImageBuffer = try vImage_Buffer(cgImage: self)
+            
+            var mediumDesination = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: mediumFormat.bitsPerPixel)
+            
+            let converter = vImageConverter_CreateWithCGImageFormat(
+                &sourceFormat,
+                &mediumFormat,
+                nil,
+                vImage_Flags(kvImagePrintDiagnosticsToConsole),
+                nil)
+            
+            guard let converter = converter?.takeRetainedValue() else {
+                throw ShapedArrayError.vImageConverterNotInitialized
+            }
+            
+            vImageConvert_AnyToAny(converter, &sourceImageBuffer, &mediumDesination, nil, vImage_Flags(kvImagePrintDiagnosticsToConsole))
+            
+            var destinationA = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
+            var destinationR = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
+            var destinationG = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
+            var destinationB = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
+            
+            var minFloat: [Float] = Array(repeating: minValue, count: 4)
+            var maxFloat: [Float] = Array(repeating: maxValue, count: 4)
+            
+            vImageConvert_ARGB8888toPlanarF(&mediumDesination, &destinationA, &destinationR, &destinationG, &destinationB, &maxFloat, &minFloat, .zero)
+           
+            let redData = Data(bytes: destinationR.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
+            let greenData = Data(bytes: destinationG.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
+            let blueData = Data(bytes: destinationB.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
+            
+            let imageData = redData + greenData + blueData
 
-        let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.width, self.height])
-        
-        return shapedArray
+            let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.width, self.height])
+            
+            return shapedArray
     }
 }
 
