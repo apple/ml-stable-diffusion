@@ -255,6 +255,7 @@ Note that the chunked version of Unet is checked for first. Only if it is not pr
 
 Hugging Face has made the app [available in the Mac App Store](https://apps.apple.com/app/diffusers/id1666309574?mt=12).
 
+There is also a third-party app for an [iPad in AppStore](https://apps.apple.com/ca/app/art-diffusion/id1669933829). You can watch the progress of Image Creation and create several images at time. It is free and doesn't have any in-app purchases.
 </details>
 
 ## <a name="performance-benchmark"></a> Performance Benchmark
