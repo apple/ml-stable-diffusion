@@ -33,6 +33,8 @@ extension StableDiffusionPipeline {
         public var seed: UInt32 = 0
         /// Controls the influence of the text prompt on sampling process (0=random images)
         public var guidanceScale: Float = 7.5
+        /// List of Images for available ControlNet Models
+        public var controlNetInputs: [CGImage] = []
         /// Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
         public var disableSafety: Bool = false
         /// The type of Scheduler to use.

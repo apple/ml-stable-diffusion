@@ -47,6 +47,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Optional model for checking safety of generated image
     var safetyChecker: SafetyChecker? = nil
+    
+    /// Optional model used before Unet to control generated images by additonal inputs
+    var controlNet: ControlNet? = nil
 
     /// Reports whether this pipeline can perform safety checks
     public var canSafetyCheck: Bool {
@@ -67,6 +70,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - textEncoder: Model for encoding tokenized text
     ///   - unet: Model for noise prediction on latent samples
     ///   - decoder: Model for decoding latent sample to image
+    ///   - controlNet: Optional model to control generated images by additonal inputs
     ///   - safetyChecker: Optional model for checking safety of generated images
     ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
@@ -74,12 +78,14 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 unet: Unet,
                 decoder: Decoder,
                 encoder: Encoder?,
+                controlNet: ControlNet? = nil,
                 safetyChecker: SafetyChecker? = nil,
                 reduceMemory: Bool = false) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
         self.encoder = encoder
+        self.controlNet = controlNet
         self.safetyChecker = safetyChecker
         self.reduceMemory = reduceMemory
     }
@@ -95,6 +101,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
             try textEncoder.loadResources()
             try unet.loadResources()
             try decoder.loadResources()
+            try controlNet?.loadResources()
             try safetyChecker?.loadResources()
         }
     }
@@ -104,6 +111,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         textEncoder.unloadResources()
         unet.unloadResources()
         decoder.unloadResources()
+        controlNet?.unloadResources()
         safetyChecker?.unloadResources()
     }
 
@@ -112,6 +120,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         try textEncoder.prewarmResources()
         try unet.prewarmResources()
         try decoder.prewarmResources()
+        try controlNet?.prewarmResources()
         try safetyChecker?.prewarmResources()
     }
 
@@ -154,6 +163,15 @@ public struct StableDiffusionPipeline: ResourceManaging {
         // Generate random latent samples from specified seed
         var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
         let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
+        
+        // Convert cgImage for ControlNet into MLShapedArray
+        let controlNetConds = try config.controlNetInputs.map { cgImage in
+            let shapedArray = try cgImage.plannerRGBShapedArray(minValue: 0.0, maxValue: 1.0)
+            return MLShapedArray(
+                concatenating: [shapedArray, shapedArray],
+                alongAxis: 0
+            )
+        }
 
         // De-noising loop
         let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
@@ -164,13 +182,22 @@ public struct StableDiffusionPipeline: ResourceManaging {
             let latentUnetInput = latents.map {
                 MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
             }
-
+            
+            // Before Unet, execute controlNet and add the output into Unet inputs
+            let additionalResiduals = try controlNet?.execute(
+                latents: latentUnetInput,
+                timeStep: t,
+                hiddenStates: hiddenStates,
+                images: controlNetConds
+            )
+            
             // Predict noise residuals from latent samples
             // and current time step conditioned on hidden states
             var noise = try unet.predictNoise(
                 latents: latentUnetInput,
                 timeStep: t,
-                hiddenStates: hiddenStates
+                hiddenStates: hiddenStates,
+                additionalResiduals: additionalResiduals
             )
 
             noise = performGuidance(noise, config.guidanceScale)
@@ -201,6 +228,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
 
         if reduceMemory {
+            controlNet?.unloadResources()
             unet.unloadResources()
         }
 

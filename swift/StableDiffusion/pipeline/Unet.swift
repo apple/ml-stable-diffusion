@@ -79,19 +79,25 @@ public struct Unet: ResourceManaging {
     func predictNoise(
         latents: [MLShapedArray<Float32>],
         timeStep: Int,
-        hiddenStates: MLShapedArray<Float32>
+        hiddenStates: MLShapedArray<Float32>,
+        additionalResiduals: [[String: MLShapedArray<Float32>]]? = nil
     ) throws -> [MLShapedArray<Float32>] {
 
         // Match time step batch dimension to the model / latent samples
         let t = MLShapedArray<Float32>(scalars:[Float(timeStep), Float(timeStep)],shape:[2])
 
         // Form batch input to model
-        let inputs = try latents.map {
-            let dict: [String: Any] = [
-                "sample" : MLMultiArray($0),
+        let inputs = try latents.enumerated().map {
+            var dict: [String: Any] = [
+                "sample" : MLMultiArray($0.element),
                 "timestep" : MLMultiArray(t),
                 "encoder_hidden_states": MLMultiArray(hiddenStates)
             ]
+            if let residuals = additionalResiduals?[$0.offset] {
+                for (k, v) in residuals {
+                    dict[k] = MLMultiArray(v)
+                }
+            }
             return try MLDictionaryFeatureProvider(dictionary: dict)
         }
         let batch = MLArrayBatchProvider(array: inputs)

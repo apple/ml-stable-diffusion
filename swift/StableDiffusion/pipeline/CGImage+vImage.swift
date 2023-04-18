@@ -63,8 +63,8 @@ extension CGImage {
         return cgImage
     }
     
-    public var plannerRGBShapedArray: MLShapedArray<Float32> {
-        get throws {
+    public func plannerRGBShapedArray(minValue: Float, maxValue: Float)
+        throws -> MLShapedArray<Float32> {
             guard
                 var sourceFormat = vImage_CGImageFormat(cgImage: self),
                 var mediumFormat = vImage_CGImageFormat(
@@ -100,8 +100,8 @@ extension CGImage {
             var destinationG = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
             var destinationB = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
             
-            var minFloat: [Float] = [-1.0, -1.0, -1.0, -1.0]
-            var maxFloat: [Float] = [1.0, 1.0, 1.0, 1.0]
+            var minFloat: [Float] = Array(repeating: minValue, count: 4)
+            var maxFloat: [Float] = Array(repeating: maxValue, count: 4)
             
             vImageConvert_ARGB8888toPlanarF(&mediumDesination, &destinationA, &destinationR, &destinationG, &destinationB, &maxFloat, &minFloat, .zero)
            
@@ -114,7 +114,6 @@ extension CGImage {
             let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.width, self.height])
             
             return shapedArray
-        }
     }
 }
 

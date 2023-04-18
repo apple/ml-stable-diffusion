@@ -8,6 +8,7 @@ import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
 import Cocoa
+import CoreImage
 
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
@@ -71,6 +72,18 @@ struct StableDiffusionSample: ParsableCommand {
 
     @Option(help: "Random number generator to use, one of {numpy, torch}")
     var rng: RNGOption = .numpy
+    
+    @Option(
+        parsing: .upToNextOption,
+        help: "ControlNet models used in image generation (enter file names in Resources/controlnet without extension)"
+    )
+    var controlnet: [String] = []
+    
+    @Option(
+        parsing: .upToNextOption,
+        help: "image for each controlNet model (corresponding to the same order as --controlnet)"
+    )
+    var controlnetInputs: [String] = []
 
     @Flag(help: "Disable safety checking")
     var disableSafety: Bool = false
@@ -90,6 +103,7 @@ struct StableDiffusionSample: ParsableCommand {
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
         let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL,
+                                                   controlNet: controlnet,
                                                    configuration: config,
                                                    disableSafety: disableSafety,
                                                    reduceMemory: reduceMemory)
@@ -99,20 +113,28 @@ struct StableDiffusionSample: ParsableCommand {
         if let image {
             let imageURL = URL(filePath: image)
             do {
-                let imageData = try Data(contentsOf: imageURL)
-                guard
-                    let nsImage = NSImage(data: imageData),
-                    let loadedImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
-                else {
-                    throw RunError.resources("Starting Image not available \(resourcePath)")
-                }
-                startingImage = loadedImage
+                startingImage = try convertImageToCGImage(imageURL: imageURL)
             } catch let error {
                 throw RunError.resources("Starting image not found \(imageURL), error: \(error)")
             }
             
         } else {
             startingImage = nil
+        }
+        
+        // convert image for ControlNet into CGImage when controlNet available
+        let controlNetInputs: [CGImage]
+        if !controlnet.isEmpty {
+            controlNetInputs = try controlnetInputs.map { imagePath in
+                let imageURL = URL(filePath: imagePath)
+                do {
+                    return try convertImageToCGImage(imageURL: imageURL)
+                } catch let error {
+                    throw RunError.resources("Image for ControlNet not found \(imageURL), error: \(error)")
+                }
+            }
+        } else {
+            controlNetInputs = []
         }
 
         log("Sampling ...\n")
@@ -127,6 +149,7 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.imageCount = imageCount
         pipelineConfig.stepCount = stepCount
         pipelineConfig.seed = seed
+        pipelineConfig.controlNetInputs = controlNetInputs
         pipelineConfig.guidanceScale = guidanceScale
         pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
         pipelineConfig.rngType = rng.stableDiffusionRNG
@@ -143,6 +166,17 @@ struct StableDiffusionSample: ParsableCommand {
             })
 
         _ = try saveImages(images, logNames: true)
+    }
+    
+    func convertImageToCGImage(imageURL: URL) throws -> CGImage {
+        let imageData = try Data(contentsOf: imageURL)
+        guard
+            let nsImage = NSImage(data: imageData),
+            let loadedImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
+            throw RunError.resources("Image not available \(resourcePath)")
+        }
+        return loadedImage
     }
 
     func handleProgress(

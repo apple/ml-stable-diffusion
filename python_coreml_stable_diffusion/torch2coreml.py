@@ -3,13 +3,13 @@
 # Copyright (C) 2022 Apple Inc. All Rights Reserved.
 #
 
-from python_coreml_stable_diffusion import unet
+from python_coreml_stable_diffusion import unet, controlnet
 
 import argparse
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 import coremltools as ct
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, ControlNetModel
 import gc
 
 import logging
@@ -24,6 +24,8 @@ from python_coreml_stable_diffusion import chunk_mlprogram
 import requests
 import shutil
 import time
+import re
+import pathlib
 
 import torch
 import torch.nn as nn
@@ -84,7 +86,6 @@ def report_correctness(original_outputs, final_outputs, log_prefix):
         )
     return final_psnr
 
-
 def _get_out_path(args, submodule_name):
     fname = f"Stable_Diffusion_version_{args.model_version}_{submodule_name}.mlpackage"
     fname = fname.replace("/", "_")
@@ -100,8 +101,10 @@ def _save_mlpackage(model, output_path):
 
 
 def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
-                       output_names, args):
-    out_path = _get_out_path(args, submodule_name)
+                       output_names, args, out_path=None):
+
+    if out_path is None:
+        out_path = _get_out_path(args, submodule_name)
 
     if os.path.exists(out_path):
         logger.info(f"Skipping export because {out_path} already exists")
@@ -140,21 +143,32 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
 
 def quantize_weights_to_8bits(args):
     for model_name in [
-            "text_encoder", "vae_decoder", "vae_encoder", "unet", "unet_chunk1",
-            "unet_chunk2", "safety_checker"
+            "text_encoder", "vae_decoder", "vae_encoder", "unet", "unet_chunk1", "unet_chunk2", 
+            "control-unet", "control-unet_chunk1", "control-unet_chunk2", "safety_checker"
     ]:
         out_path = _get_out_path(args, model_name)
-        if os.path.exists(out_path):
-            logger.info(f"Quantizing {model_name}")
-            mlmodel = ct.models.MLModel(out_path,
-                                        compute_units=ct.ComputeUnit.CPU_ONLY)
-            mlmodel = ct.compression_utils.affine_quantize_weights(
-                mlmodel, mode="linear")
-            mlmodel.save(out_path)
-            logger.info("Done")
-        else:
-            logger.info(
-                f"Skipped quantizing {model_name} (Not found at {out_path})")
+        _quantize_and_save_8bits_model(out_path, model_name)
+
+    if args.convert_controlnet:
+        for controlnet_model_version in args.convert_controlnet:
+            controlnet_model_name = controlnet_model_version.replace("/", "_")
+            fname = f"ControlNet_{controlnet_model_name}.mlpackage"
+            out_path = os.path.join(args.o, fname)
+            _quantize_and_save_8bits_model(out_path, controlnet_model_name)
+            
+
+def _quantize_and_save_8bits_model(out_path, model_name):
+    if os.path.exists(out_path):
+        logger.info(f"Quantizing {model_name}")
+        mlmodel = ct.models.MLModel(out_path,
+                                    compute_units=ct.ComputeUnit.CPU_ONLY)
+        mlmodel = ct.compression_utils.affine_quantize_weights(
+            mlmodel, mode="linear")
+        mlmodel.save(out_path)
+        logger.info("Done")
+    else:
+        logger.info(
+            f"Skipped quantizing {model_name} (Not found at {out_path})")
 
 
 def _compile_coreml_model(source_model_path, output_dir, final_name):
@@ -194,6 +208,9 @@ def bundle_resources_for_swift_cli(args):
                                      ("unet", "Unet"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
+                                     ("control-unet", "ControlledUnet"),
+                                     ("control-unet_chunk1", "ControlledUnetChunk1"),
+                                     ("control-unet_chunk2", "ControlledUnetChunk2"),
                                      ("safety_checker", "SafetyChecker")]:
         source_path = _get_out_path(args, source_name)
         if os.path.exists(source_path):
@@ -204,6 +221,23 @@ def bundle_resources_for_swift_cli(args):
             logger.warning(
                 f"{source_path} not found, skipping compilation to {target_name}.mlmodelc"
             )
+            
+    if args.convert_controlnet:
+        for controlnet_model_version in args.convert_controlnet:
+            controlnet_model_name = controlnet_model_version.replace("/", "_")
+            fname = f"ControlNet_{controlnet_model_name}.mlpackage"
+            source_path = os.path.join(args.o, fname)
+            controlnet_dir = os.path.join(resources_dir, "controlnet")
+            target_name = "".join([word.title() for word in re.split('_|-', controlnet_model_name)])
+
+            if os.path.exists(source_path):
+                target_path = _compile_coreml_model(source_path, controlnet_dir,
+                                                    target_name)
+                logger.info(f"Compiled {source_path} to {target_path}")
+            else:
+                logger.warning(
+                    f"{source_path} not found, skipping compilation to {target_name}.mlmodelc"
+                )
 
     # Fetch and save vocabulary JSON file for text tokenizer
     logger.info("Downloading and saving tokenizer vocab.json")
@@ -543,7 +577,12 @@ def convert_vae_encoder(pipe, args):
 def convert_unet(pipe, args):
     """ Converts the UNet component of Stable Diffusion
     """
-    out_path = _get_out_path(args, "unet")
+    if args.unet_support_controlnet:
+        unet_name = "control-unet"
+    else:
+        unet_name = "unet"
+
+    out_path = _get_out_path(args, unet_name)
 
     # Check if Unet was previously exported and then chunked
     unet_chunks_exist = all(
@@ -559,13 +598,6 @@ def convert_unet(pipe, args):
 
     # If original Unet does not exist, export it from PyTorch+diffusers
     elif not os.path.exists(out_path):
-        # Register the selected attention implementation globally
-        unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
-            args.attention_implementation]
-        logger.info(
-            f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
-        )
-
         # Prepare sample input shapes and values
         batch_size = 2  # for classifier-free guidance
         sample_shape = (
@@ -598,22 +630,58 @@ def convert_unet(pipe, args):
                           (batch_size)).to(torch.float32)),
             ("encoder_hidden_states", torch.rand(*encoder_hidden_states_shape))
         ])
-        sample_unet_inputs_spec = {
-            k: (v.shape, v.dtype)
-            for k, v in sample_unet_inputs.items()
-        }
-        logger.info(f"Sample inputs spec: {sample_unet_inputs_spec}")
-
-        # Initialize reference unet
-        reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
-        load_state_dict_summary = reference_unet.load_state_dict(
-            pipe.unet.state_dict())
 
         # Prepare inputs
         baseline_sample_unet_inputs = deepcopy(sample_unet_inputs)
         baseline_sample_unet_inputs[
             "encoder_hidden_states"] = baseline_sample_unet_inputs[
                 "encoder_hidden_states"].squeeze(2).transpose(1, 2)
+
+        # Initialize reference unet
+        reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
+        load_state_dict_summary = reference_unet.load_state_dict(
+            pipe.unet.state_dict())
+
+        if args.unet_support_controlnet:
+            from .unet import calculate_conv2d_output_shape
+            additional_residuals_shapes = []
+            in_size = pipe.unet.config.sample_size
+
+            # conv_in
+            out_h, out_w = calculate_conv2d_output_shape(in_size, in_size, reference_unet.conv_in)
+            additional_residuals_shapes.append(
+                (batch_size, reference_unet.conv_in.out_channels, out_h, out_w))
+            
+            # down_blocks
+            for down_block in reference_unet.down_blocks:
+                additional_residuals_shapes += [
+                    (batch_size, resnet.out_channels, out_h, out_w) for resnet in down_block.resnets
+                ]
+                if hasattr(down_block, "downsamplers") and down_block.downsamplers is not None:
+                    for downsampler in down_block.downsamplers:
+                        out_h, out_w = calculate_conv2d_output_shape(out_h, out_w, downsampler.conv)
+                    additional_residuals_shapes.append(
+                        (batch_size, down_block.downsamplers[-1].conv.out_channels, out_h, out_w))
+            
+            # mid_block
+            additional_residuals_shapes.append(
+                (batch_size, reference_unet.mid_block.resnets[-1].out_channels, out_h, out_w)
+            )
+
+            baseline_sample_unet_inputs["down_block_additional_residuals"] = ()
+            for i, shape in enumerate(additional_residuals_shapes):
+                sample_residual_input = torch.rand(*shape)
+                sample_unet_inputs[f"additional_residual_{i}"] = sample_residual_input
+                if i == len(additional_residuals_shapes) - 1:
+                    baseline_sample_unet_inputs["mid_block_additional_residual"] = sample_residual_input
+                else:
+                    baseline_sample_unet_inputs["down_block_additional_residuals"] += (sample_residual_input, )
+
+        sample_unet_inputs_spec = {
+            k: (v.shape, v.dtype)
+            for k, v in sample_unet_inputs.items()
+        }
+        logger.info(f"Sample UNet inputs spec: {sample_unet_inputs_spec}")
 
         # JIT trace
         logger.info("JIT tracing..")
@@ -624,7 +692,7 @@ def convert_unet(pipe, args):
         if args.check_output_correctness:
             baseline_out = pipe.unet(**baseline_sample_unet_inputs,
                                      return_dict=False)[0].numpy()
-            reference_out = reference_unet(**sample_unet_inputs)[0].numpy()
+            reference_out = reference_unet(*sample_unet_inputs.values())[0].numpy()
             report_correctness(baseline_out, reference_out,
                                "unet baseline to reference PyTorch")
 
@@ -636,7 +704,7 @@ def convert_unet(pipe, args):
             for k, v in sample_unet_inputs.items()
         }
 
-        coreml_unet, out_path = _convert_to_coreml("unet", reference_unet,
+        coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
                                                    ["noise_pred"], args)
         del reference_unet
@@ -872,6 +940,174 @@ def convert_safety_checker(pipe, args):
     del traced_safety_checker, coreml_safety_checker, pipe.safety_checker
     gc.collect()
 
+def convert_controlnet(pipe, args):
+    """ Converts each ControlNet for Stable Diffusion
+    """
+    if not hasattr(pipe, "unet"):
+        raise RuntimeError(
+            "convert_unet() deletes pipe.unet to save RAM. "
+            "Please use convert_vae_encoder() before convert_unet()")
+
+    if not hasattr(pipe, "text_encoder"):
+            raise RuntimeError(
+                "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
+                "Please use convert_unet() before convert_text_encoder()")
+
+    if args.model_version != "runwayml/stable-diffusion-v1-5":
+        logger.warning(
+            "The original ControlNet models were trained using Stable Diffusion v1.5. "
+            "It is possible that the converted model may not be compatible with controlnet.")
+
+    for i, controlnet_model_version in enumerate(args.convert_controlnet):
+        controlnet_model_name = controlnet_model_version.replace("/", "_")
+        fname = f"ControlNet_{controlnet_model_name}.mlpackage"
+        out_path = os.path.join(args.o, fname)
+
+        if os.path.exists(out_path):
+            logger.info(
+                f"`controlnet_{controlnet_model_name}` already exists at {out_path}, skipping conversion."
+            )
+            continue
+
+        if i == 0:
+            batch_size = 2  # for classifier-free guidance
+            sample_shape = (
+                batch_size,                    # B
+                pipe.unet.config.in_channels,  # C
+                pipe.unet.config.sample_size,  # H
+                pipe.unet.config.sample_size,  # W
+            )
+
+            encoder_hidden_states_shape = (
+                batch_size,
+                pipe.text_encoder.config.hidden_size,
+                1,
+                pipe.text_encoder.config.max_position_embeddings,
+            )
+
+            controlnet_cond_shape = (
+                batch_size,                                           # B
+                3,                                                    # C
+                (args.latent_h or pipe.unet.config.sample_size) * 8,  # H
+                (args.latent_w or pipe.unet.config.sample_size) * 8,  # w
+            )
+
+            # Create the scheduled timesteps for downstream use
+            DEFAULT_NUM_INFERENCE_STEPS = 50
+            pipe.scheduler.set_timesteps(DEFAULT_NUM_INFERENCE_STEPS)
+
+            # Prepare inputs
+            sample_controlnet_inputs = OrderedDict([
+                ("sample", torch.rand(*sample_shape)),
+                ("timestep",
+                torch.tensor([pipe.scheduler.timesteps[0].item()] *
+                             (batch_size)).to(torch.float32)),
+                ("encoder_hidden_states", torch.rand(*encoder_hidden_states_shape)),
+                ("controlnet_cond", torch.rand(*controlnet_cond_shape)),
+            ])
+            sample_controlnet_inputs_spec = {
+                k: (v.shape, v.dtype)
+                for k, v in sample_controlnet_inputs.items()
+            }
+            logger.info(
+                f"Sample ControlNet inputs spec: {sample_controlnet_inputs_spec}")
+
+            baseline_sample_controlnet_inputs = deepcopy(sample_controlnet_inputs)
+            baseline_sample_controlnet_inputs[
+                "encoder_hidden_states"] = baseline_sample_controlnet_inputs[
+                    "encoder_hidden_states"].squeeze(2).transpose(1, 2)
+
+        # Import controlnet model and initialize reference controlnet
+        original_controlnet = ControlNetModel.from_pretrained(
+            controlnet_model_version,
+            use_auth_token=True
+        )
+        reference_controlnet = controlnet.ControlNetModel(**original_controlnet.config).eval()
+        load_state_dict_summary = reference_controlnet.load_state_dict(
+            original_controlnet.state_dict())
+
+        num_residuals = reference_controlnet.get_num_residuals()
+        output_keys = [f"additional_residual_{i}" for i in range(num_residuals)]
+
+        # JIT trace
+        logger.info("JIT tracing..")
+        reference_controlnet = torch.jit.trace(reference_controlnet,
+                                         list(sample_controlnet_inputs.values()))
+        logger.info("Done.")
+
+        if args.check_output_correctness:
+            baseline_out = original_controlnet(**baseline_sample_controlnet_inputs,
+                                     return_dict=False)
+            reference_out = reference_controlnet(*sample_controlnet_inputs.values())
+
+            baseline_down_residuals, baseline_mid_residuals = baseline_out
+            baseline_out = baseline_down_residuals + (baseline_mid_residuals,)
+            reference_down_residuals, reference_mid_residuals = reference_out
+            reference_out = reference_down_residuals +(reference_mid_residuals,)
+
+            for key, b_out, r_out in zip(output_keys, baseline_out, reference_out):
+                b_out = b_out.numpy()
+                r_out = r_out.numpy()
+                logger.info(f"Check {key} correctness")
+                report_correctness(b_out, r_out,
+                                f"controlnet({controlnet_model_name}) baseline to reference PyTorch")
+
+        del original_controlnet
+        gc.collect()
+
+        coreml_sample_controlnet_inputs = {
+            k: v.numpy().astype(np.float16)
+            for k, v in sample_controlnet_inputs.items()
+        }
+
+        coreml_controlnet, out_path = _convert_to_coreml(f"controlnet_{controlnet_model_name}", reference_controlnet,
+                                                   coreml_sample_controlnet_inputs,
+                                                   output_keys, args,
+                                                   out_path=out_path)
+
+        del reference_controlnet
+        gc.collect()
+
+        coreml_controlnet.author = f"Please refer to the Model Card available at huggingface.co/{controlnet_model_version}"
+        coreml_controlnet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_controlnet.version = controlnet_model_version
+        coreml_controlnet.short_description = \
+            "ControlNet is a neural network structure to control diffusion models by adding extra conditions. " \
+            "Please refer to https://arxiv.org/abs/2302.05543 for details."
+
+        # Set the input descriptions
+        coreml_controlnet.input_description["sample"] = \
+            "The low resolution latent feature maps being denoised through reverse diffusion"
+        coreml_controlnet.input_description["timestep"] = \
+            "A value emitted by the associated scheduler object to condition the model on a given noise schedule"
+        coreml_controlnet.input_description["encoder_hidden_states"] = \
+            "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
+            "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
+            "Shorter text does not reduce computation."
+        coreml_controlnet.input_description["controlnet_cond"] = \
+            "An additional input image for ControlNet to condition the generated images."
+
+        # Set the output descriptions
+        for i in range(num_residuals):
+            coreml_controlnet.output_description[f"additional_residual_{i}"] = \
+                "One of the outputs of each downsampling block in ControlNet. " \
+                "The value added to the corresponding resnet output in UNet."
+
+        _save_mlpackage(coreml_controlnet, out_path)
+        logger.info(f"Saved controlnet into {out_path}")
+
+        # Parity check PyTorch vs CoreML
+        if args.check_output_correctness:
+            coreml_out = coreml_controlnet.predict(coreml_sample_controlnet_inputs)
+            for key, b_out in zip(output_keys, baseline_out):
+                b_out = b_out.numpy()
+                logger.info(f"Check {key} correctness")
+                report_correctness(b_out, coreml_out[key],
+                                "controlnet baseline PyTorch to reference CoreML")
+        
+        del coreml_controlnet
+        gc.collect()
+
 
 def main(args):
     os.makedirs(args.o, exist_ok=True)
@@ -882,6 +1118,13 @@ def main(args):
     pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
                                                    use_auth_token=True)
     logger.info("Done.")
+
+    # Register the selected attention implementation globally
+    unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
+        args.attention_implementation]
+    logger.info(
+        f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
+    )
 
     # Convert models
     if args.convert_vae_decoder:
@@ -894,6 +1137,11 @@ def main(args):
         convert_vae_encoder(pipe, args)
         logger.info("Converted vae_encoder")
 
+    if args.convert_controlnet:
+        logger.info("Converting controlnet")
+        convert_controlnet(pipe, args)
+        logger.info("Converted controlnet")
+        
     if args.convert_unet:
         logger.info("Converting unet")
         convert_unet(pipe, args)
@@ -930,6 +1178,14 @@ def parser_spec():
     parser.add_argument("--convert-vae-encoder", action="store_true")
     parser.add_argument("--convert-unet", action="store_true")
     parser.add_argument("--convert-safety-checker", action="store_true")
+    parser.add_argument(
+        "--convert-controlnet", 
+        nargs="*", 
+        type=str,
+        help=
+        "Converts a ControlNet model hosted on HuggingFace to coreML format. " \
+        "To convert multiple models, provide their names separated by spaces.",
+    )
     parser.add_argument(
         "--model-version",
         default="CompVis/stable-diffusion-v1-4",
@@ -988,6 +1244,13 @@ def parser_spec():
         help=
         ("If specified, quantize 16-bits weights to 8-bits weights in-place for all models. "
          "Not recommended as the generated image quality degraded significantly after 8-bit weight quantization"
+         ))
+    parser.add_argument(
+        "--unet-support-controlnet",
+        action="store_true",
+        help=
+        ("If specified, enable unet to receive additional inputs from controlnet. "
+         "Each input added to corresponding resnet output."
          ))
 
     # Swift CLI Resource Bundling

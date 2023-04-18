@@ -937,6 +937,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         sample,
         timestep,
         encoder_hidden_states,
+        *additional_residuals,
     ):
         # 0. Project (or look-up) time embeddings
         t_emb = self.time_proj(timestep)
@@ -965,10 +966,20 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
             down_block_res_samples += res_samples
 
+        if additional_residuals:
+            new_down_block_res_samples = ()
+            for i, down_block_res_sample in enumerate(down_block_res_samples):
+                down_block_res_sample = down_block_res_sample + additional_residuals[i]
+                new_down_block_res_samples += (down_block_res_sample,)
+            down_block_res_samples = new_down_block_res_samples
+
         # 4. mid
         sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
+        
+        if additional_residuals:
+            sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:
@@ -1081,3 +1092,13 @@ def get_up_block(
             attn_num_head_channels=attn_num_head_channels,
         )
     raise ValueError(f"{up_block_type} does not exist.")
+
+def calculate_conv2d_output_shape(in_h, in_w, conv2d_layer):
+    k_h, k_w = conv2d_layer.kernel_size
+    pad_h, pad_w = conv2d_layer.padding
+    stride_h, stride_w = conv2d_layer.stride
+
+    out_h = math.floor((in_h + 2 * pad_h - k_h) / stride_h + 1)
+    out_w = math.floor((in_w + 2 * pad_w - k_w) / stride_w + 1)
+
+    return out_h, out_w
