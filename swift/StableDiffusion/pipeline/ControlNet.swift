@@ -88,37 +88,40 @@ public struct ControlNet: ResourceManaging {
                 try $0.predictions(fromBatch: batch)
             }
             
+            // pre-allocate MLShapedArray with a specific shape in outputs
+            if outputs.isEmpty {
+                outputs = initOutputs(
+                    batch: latents.count,
+                    shapes: results.features(at: 0).featureValueDictionary
+                )
+            }
+            
             for n in 0..<results.count {
                 let result = results.features(at: n)
-                if outputs.count < results.count {
-                    let initOutput = result.featureNames.reduce(into: [String: MLShapedArray<Float32>]()) { output, k in
-                        let multiArray = MLMultiArray(
-                            concatenating: [result.featureValue(for: k)!.multiArrayValue!],
-                            axis: 0,
-                            dataType: .float32
-                        )
-                        output[k] = MLShapedArray(multiArray)
-                    }
-                    outputs.append(initOutput)
-                } else {
-                    var currentOutput = outputs[n]
-                    for k in result.featureNames {
-                        let newValue = MLMultiArray(
-                            concatenating: [result.featureValue(for: k)!.multiArrayValue!],
-                            axis: 0,
-                            dataType: .float32
-                        )
-                        let currentValue = MLMultiArray(currentOutput[k]!)
-                        for i in 0..<newValue.count {
-                            currentValue[i] = NSNumber(value: currentValue[i].floatValue + newValue[i].floatValue)
+                for k in result.featureNames {
+                    let newValue = result.featureValue(for: k)!.shapedArrayValue(of: Float32.self)!
+                    if modelIndex == 0 {
+                        outputs[n][k] = newValue
+                    } else {
+                        outputs[n][k]!.withUnsafeMutableShapedBufferPointer { pt, _, _ in
+                            for (i, v) in newValue.scalars.enumerated() { pt[i] += v }
                         }
-                        currentOutput[k] = MLShapedArray(currentValue)
                     }
-                    outputs[n] = currentOutput
                 }
             }
         }
         
         return outputs
+    }
+    
+    private func initOutputs(batch: Int, shapes: [String: MLFeatureValue]) -> [[String: MLShapedArray<Float32>]] {
+        var output: [String: MLShapedArray<Float32>] = [:]
+        for (outputName, featureValue) in shapes {
+            output[outputName] = MLShapedArray<Float32>(
+                repeating: 0.0,
+                shape: featureValue.multiArrayValue!.shape.map { $0.intValue }
+            )
+        }
+        return Array(repeating: output, count: batch)
     }
 }
