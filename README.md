@@ -316,6 +316,20 @@ Differences may be less or more pronounced for different inputs. Please see the 
 
 </details>
 
+## <a name="results-with-controlnet"></a> Results with ControlNet
+
+<details>
+  <summary> Click to expand </summary>
+
+[ControlNet](https://huggingface.co/lllyasviel/ControlNet) allows users to condition image generation with Stable Diffusion on signals such as edge maps, depth maps, segmentation maps, scribbles and pose. Thanks to [@ryu38's contribution](https://github.com/apple/ml-stable-diffusion/pull/153), both the Python CLI and the Swift package support ControlNet models. Please refer to CLI arguments in previous sections to exercise this new feature.
+
+Example results using the prompt "a high quality photo of a surfing dog" conditioned on the scribble (leftmost):
+
+<img src="assets/controlnet_readme_reel.png">
+
+</details>
+
+
 ##  <a name="faq"></a> FAQ
 
 <details>
