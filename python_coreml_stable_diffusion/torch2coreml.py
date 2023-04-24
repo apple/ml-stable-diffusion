@@ -645,10 +645,13 @@ def convert_unet(pipe, args):
         if args.unet_support_controlnet:
             from .unet import calculate_conv2d_output_shape
             additional_residuals_shapes = []
-            in_size = pipe.unet.config.sample_size
 
             # conv_in
-            out_h, out_w = calculate_conv2d_output_shape(in_size, in_size, reference_unet.conv_in)
+            out_h, out_w = calculate_conv2d_output_shape(
+                (args.latent_h or pipe.unet.config.sample_size),
+                (args.latent_w or pipe.unet.config.sample_size),
+                reference_unet.conv_in,
+            )
             additional_residuals_shapes.append(
                 (batch_size, reference_unet.conv_in.out_channels, out_h, out_w))
             
@@ -775,11 +778,20 @@ def convert_safety_checker(pipe, args):
         )
         return
 
+    im_h = pipe.vae.config.sample_size
+    im_w = pipe.vae.config.sample_size
+
+    if args.latent_h is not None:
+        im_h = args.latent_h * 8
+
+    if args.latent_w is not None:
+        im_w = args.latent_w * 8
+
     sample_image = np.random.randn(
-        1,  # B
-        args.latent_h or pipe.vae.config.sample_size,  # H
-        args.latent_w or pipe.vae.config.sample_size,  # w
-        3  # C
+        1,     # B
+        im_h,  # H
+        im_w,  # w
+        3      # C
     ).astype(np.float32)
 
     # Note that pipe.feature_extractor is not an ML model. It simply
@@ -974,8 +986,8 @@ def convert_controlnet(pipe, args):
             sample_shape = (
                 batch_size,                    # B
                 pipe.unet.config.in_channels,  # C
-                pipe.unet.config.sample_size,  # H
-                pipe.unet.config.sample_size,  # W
+                (args.latent_h or pipe.unet.config.sample_size),  # H
+                (args.latent_w or pipe.unet.config.sample_size),  # W
             )
 
             encoder_hidden_states_shape = (
