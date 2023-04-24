@@ -580,6 +580,7 @@ def main(args):
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
         controlnet_cond=controlnet_cond,
+        negative_prompt=args.negative_prompt,
     )
 
     out_path = get_image_path(args)
@@ -646,6 +647,10 @@ if __name__ == "__main__":
         type=str,
         help=("Image paths for ControlNet inputs. "
             "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
+    parser.add_argument(
+        "--negative-prompt",
+        default=None,
+        help="The negative text prompt to be used for text-to-image generation.")
 
     args = parser.parse_args()
     main(args)
