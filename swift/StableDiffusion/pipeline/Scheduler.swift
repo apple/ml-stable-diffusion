@@ -1,6 +1,7 @@
 // For licensing see accompanying LICENSE.md file.
 // Copyright (C) 2022 Apple Inc. All Rights Reserved.
 
+import Accelerate
 import CoreML
 
 @available(iOS 16.2, macOS 13.1, *)
@@ -59,18 +60,21 @@ public extension Scheduler {
     ///   - values: The arrays to be weighted and summed
     /// - Returns: sum_i weights[i]*values[i]
     func weightedSum(_ weights: [Double], _ values: [MLShapedArray<Float32>]) -> MLShapedArray<Float32> {
+        let scalarCount = values.first!.scalarCount
         assert(weights.count > 1 && values.count == weights.count)
-        assert(values.allSatisfy({ $0.scalarCount == values.first!.scalarCount }))
-        var w = Float(weights.first!)
-        var scalars = values.first!.scalars.map({ $0 * w })
-        for next in 1 ..< values.count {
-            w = Float(weights[next])
-            let nextScalars = values[next].scalars
-            for i in 0 ..< scalars.count {
-                scalars[i] += w * nextScalars[i]
+        assert(values.allSatisfy({ $0.scalarCount == scalarCount }))
+
+        return MLShapedArray(unsafeUninitializedShape: values.first!.shape) { scalars, _ in
+            scalars.initialize(repeating: 0.0)
+            for i in 0 ..< values.count {
+                let w = Float(weights[i])
+                values[i].withUnsafeShapedBufferPointer { buffer, _, _ in
+                    assert(buffer.count == scalarCount)
+                    // scalars[j] = w * values[i].scalars[j]
+                    cblas_saxpy(Int32(scalarCount), w, buffer.baseAddress, 1, scalars.baseAddress, 1)
+                }
             }
         }
-        return MLShapedArray(scalars: scalars, shape: values.first!.shape)
     }
     
     func addNoise(

@@ -286,20 +286,19 @@ public struct StableDiffusionPipeline: ResourceManaging {
     }
 
     func performGuidance(_ noise: MLShapedArray<Float32>, _ guidanceScale: Float) -> MLShapedArray<Float32> {
-
-        let blankNoiseScalars = noise[0].scalars
-        let textNoiseScalars = noise[1].scalars
-
-        var resultScalars =  blankNoiseScalars
-
-        for i in 0..<resultScalars.count {
-            // unconditioned + guidance*(text - unconditioned)
-            resultScalars[i] += guidanceScale*(textNoiseScalars[i]-blankNoiseScalars[i])
-        }
-
         var shape = noise.shape
         shape[0] = 1
-        return MLShapedArray<Float32>(scalars: resultScalars, shape: shape)
+        return MLShapedArray<Float>(unsafeUninitializedShape: shape) { result, _ in
+            noise.withUnsafeShapedBufferPointer { scalars, _, strides in
+                for i in 0 ..< result.count {
+                    // unconditioned + guidance*(text - unconditioned)
+                    result.initializeElement(
+                        at: i,
+                        to: scalars[i] + guidanceScale * (scalars[strides[0] + i] - scalars[i])
+                    )
+                }
+            }
+        }
     }
 
     func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
