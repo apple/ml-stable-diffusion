@@ -83,14 +83,20 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     /// Convert the model output to the corresponding type the algorithm needs.
     /// This implementation is for second-order DPM-Solver++ assuming epsilon prediction.
     func convertModelOutput(modelOutput: MLShapedArray<Float32>, timestep: Int, sample: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
-        assert(modelOutput.scalars.count == sample.scalars.count)
+        assert(modelOutput.scalarCount == sample.scalarCount)
+        let scalarCount = modelOutput.scalarCount
         let (alpha_t, sigma_t) = (self.alpha_t[timestep], self.sigma_t[timestep])
-        
-        // This could be optimized with a Metal kernel if we find we need to
-        let x0_scalars = zip(modelOutput.scalars, sample.scalars).map { m, s in
-            (s - m * sigma_t) / alpha_t
+
+        return MLShapedArray(unsafeUninitializedShape: modelOutput.shape) { scalars, _ in
+            assert(scalars.count == scalarCount)
+            modelOutput.withUnsafeShapedBufferPointer { modelOutput, _, _ in
+                sample.withUnsafeShapedBufferPointer { sample, _, _ in
+                    for i in 0 ..< scalarCount {
+                        scalars.initializeElement(at: i, to: (sample[i] - modelOutput[i] * sigma_t) / alpha_t)
+                    }
+                }
+            }
         }
-        return MLShapedArray(scalars: x0_scalars, shape: modelOutput.shape)
     }
 
     /// One step for the first-order DPM-Solver (equivalent to DDIM).
