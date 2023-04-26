@@ -17,19 +17,42 @@ extension BPETokenizer {
 
     /// Read merges.txt file at URL into a dictionary mapping bigrams to the line number/rank/priority
     static func readMerges(url: URL) throws -> [TokenPair: Int] {
-        let content = try String(contentsOf: url)
-        let lines = content.split(separator: "\n")
-
-        let merges: [(TokenPair, Int)] = try lines.enumerated().compactMap { (index, line) in
-            if line.hasPrefix("#") {
-                return nil
+        let data = try Data(contentsOf: url)
+        var merges = [TokenPair: Int]()
+        var index = 0
+        var line = [UInt8]()
+        for byte in data {
+            if byte == UInt8(ascii: "\n") {
+                if let pair = try parseMergesLine(line, index: index) {
+                    merges[pair] = index
+                }
+                line.removeAll(keepingCapacity: true)
+                index += 1
+            } else {
+                line.append(byte)
             }
-            let pair = line.split(separator: " ")
-            if pair.count != 2 {
-                throw FileReadError.invalidMergeFileLine(index+1)
-            }
-            return (TokenPair(String(pair[0]), String(pair[1])),index)
         }
-        return [TokenPair : Int](uniqueKeysWithValues: merges)
+
+        return merges
+    }
+
+    static func parseMergesLine(_ line: [UInt8], index: Int) throws -> TokenPair? {
+        if line.isEmpty || line.first == UInt8(ascii: "#") {
+            return nil
+        }
+        let pair = line.split(separator: UInt8(ascii: " "))
+        if pair.count != 2 {
+            throw FileReadError.invalidMergeFileLine(index + 1)
+        }
+        return TokenPair( String(bytes: pair[0]), String(bytes: pair[1]))
+    }
+}
+
+extension String {
+    init(bytes: some Collection<UInt8>) {
+        self.init(unsafeUninitializedCapacity: bytes.count) { pointer in
+            _ = pointer.initialize(fromContentsOf: bytes)
+            return bytes.count
+        }
     }
 }
