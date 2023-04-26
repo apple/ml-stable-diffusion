@@ -111,7 +111,7 @@ extension CGImage {
             
             let imageData = redData + greenData + blueData
 
-            let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.width, self.height])
+            let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.height, self.width])
             
             return shapedArray
     }
