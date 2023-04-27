@@ -18,6 +18,7 @@ setup(
         "diffusers[torch]",
         "torch",
         "transformers",
+        "huggingface-hub",
         "scipy",
         "numpy<1.24",
     ],

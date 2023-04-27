@@ -952,6 +952,11 @@ def convert_safety_checker(pipe, args):
     del traced_safety_checker, coreml_safety_checker, pipe.safety_checker
     gc.collect()
 
+def _get_controlnet_base_model(controlnet_model_version):
+    from huggingface_hub import model_info
+    info = model_info(controlnet_model_version)
+    return info.cardData.get("base_model", None)
+
 def convert_controlnet(pipe, args):
     """ Converts each ControlNet for Stable Diffusion
     """
@@ -965,12 +970,20 @@ def convert_controlnet(pipe, args):
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
 
-    if args.model_version != "runwayml/stable-diffusion-v1-5":
-        logger.warning(
-            "The original ControlNet models were trained using Stable Diffusion v1.5. "
-            "It is possible that the converted model may not be compatible with controlnet.")
-
     for i, controlnet_model_version in enumerate(args.convert_controlnet):
+        base_model = _get_controlnet_base_model(controlnet_model_version)
+
+        if base_model is None and args.model_version != "runwayml/stable-diffusion-v1-5":
+            logger.warning(
+                f"The original ControlNet models were trained using Stable Diffusion v1.5. "
+                f"It is possible that model {args.model_version} is not compatible with controlnet.")
+        if base_model is not None and base_model != args.model_version:
+            raise RuntimeError(
+                f"ControlNet model {controlnet_model_version} was trained using "
+                f"Stable Diffusion model {base_model}.\n However, you specified "
+                f"version {args.model_version} in the command line. Please, use "
+                f"--model-version {base_model} to convert this model.")
+
         controlnet_model_name = controlnet_model_version.replace("/", "_")
         fname = f"ControlNet_{controlnet_model_name}.mlpackage"
         out_path = os.path.join(args.o, fname)
