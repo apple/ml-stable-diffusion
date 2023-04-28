@@ -1253,39 +1253,39 @@ def parser_spec():
         "--check-output-correctness",
         action="store_true",
         help=
-        ("If specified, compares the outputs of original PyTorch and final CoreML models and reports PSNR in dB. ",
-         "Enabling this feature uses more memory. Disable it if your machine runs out of memory."
-         ))
+        "If specified, compares the outputs of original PyTorch and final CoreML models and reports PSNR in dB. "
+        "Enabling this feature uses more memory. Disable it if your machine runs out of memory."
+        )
     parser.add_argument(
         "--chunk-unet",
         action="store_true",
         help=
-        ("If specified, generates two mlpackages out of the unet model which approximately equal weights sizes. "
-         "This is required for ANE deployment on iOS and iPadOS. Not required for macOS."
-         ))
+        "If specified, generates two mlpackages out of the unet model which approximately equal weights sizes. "
+        "This is required for ANE deployment on iOS and iPadOS. Not required for macOS."
+        )
     parser.add_argument(
         "--quantize-weights-to-8bits",
         action="store_true",
         help=
-        ("If specified, quantize 16-bits weights to 8-bits weights in-place for all models. "
-         "Not recommended as the generated image quality degraded significantly after 8-bit weight quantization"
-         ))
+        "If specified, quantize 16-bits weights to 8-bits weights in-place for all models. "
+        "Not recommended as the generated image quality degraded significantly after 8-bit weight quantization"
+        )
     parser.add_argument(
         "--unet-support-controlnet",
         action="store_true",
         help=
-        ("If specified, enable unet to receive additional inputs from controlnet. "
-         "Each input added to corresponding resnet output."
-         ))
+        "If specified, enable unet to receive additional inputs from controlnet. "
+        "Each input added to corresponding resnet output."
+        )
 
     # Swift CLI Resource Bundling
     parser.add_argument(
         "--bundle-resources-for-swift-cli",
         action="store_true",
         help=
-        ("If specified, creates a resources directory compatible with the sample Swift CLI. "
-         "It compiles all four models and adds them to a StableDiffusionResources directory "
-         "along with a `vocab.json` and `merges.txt` for the text tokenizer"))
+        "If specified, creates a resources directory compatible with the sample Swift CLI. "
+        "It compiles all four models and adds them to a StableDiffusionResources directory "
+        "along with a `vocab.json` and `merges.txt` for the text tokenizer")
     parser.add_argument(
         "--text-encoder-vocabulary-url",
         default=
