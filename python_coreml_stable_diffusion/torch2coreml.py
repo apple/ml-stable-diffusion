@@ -438,6 +438,8 @@ def convert_vae_decoder(pipe, args):
             super().__init__()
             self.post_quant_conv = pipe.vae.post_quant_conv
             self.decoder = pipe.vae.decoder
+            # Disable torch 2.0 scaled dot product attention until it's supported by coremltools
+            self.decoder.mid_block.attentions[0]._use_2_0_attn = False
 
         def forward(self, z):
             return self.decoder(self.post_quant_conv(z))
