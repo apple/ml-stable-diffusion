@@ -527,6 +527,8 @@ def convert_vae_encoder(pipe, args):
             super().__init__()
             self.quant_conv = pipe.vae.quant_conv
             self.encoder = pipe.vae.encoder
+            # Disable torch 2.0 scaled dot-product attention: https://github.com/apple/coremltools/issues/1823
+            self.decoder.mid_block.attentions[0]._use_2_0_attn = False
 
         def forward(self, z):
             return self.quant_conv(self.encoder(z))
