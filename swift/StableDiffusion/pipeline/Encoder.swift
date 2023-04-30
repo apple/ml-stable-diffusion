@@ -102,7 +102,7 @@ public struct Encoder: ResourceManaging {
                     with this version of `ml-stable-diffusion`. Please, convert the VAE encoder again using the latest \
                     version of this package and following the instructions here: \
                     https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml
-                    We'd appreciate if you could then submit the new VAE as a PR to the repo from which this model \
+                    We'd appreciate if you could then submit the new VAE encoder as a PR to the repo from which this model \
                     was downloaded.
                     """)
             }
