@@ -173,10 +173,10 @@ Please refer to the help menu for all available arguments: `python -m python_cor
 
 ### <a name="swift-requirements"></a> System Requirements
 
-**Building** (recommended):
+**Building** (minimum):
 
-- Xcode 14.2
-- Command Line Tools for Xcode 14.2
+- Xcode 14.3
+- Command Line Tools for Xcode 14.3
 
 Check [developer.apple.com](https://developer.apple.com/download/all/?q=xcode) for the latest versions.
 
