@@ -162,6 +162,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
         // Generate random latent samples from specified seed
         var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+        if reduceMemory {
+            encoder?.unloadResources()
+        }
         let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
         
         // Convert cgImage for ControlNet into MLShapedArray
