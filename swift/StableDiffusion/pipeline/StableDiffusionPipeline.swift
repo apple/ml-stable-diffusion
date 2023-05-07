@@ -101,6 +101,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
             try textEncoder.loadResources()
             try unet.loadResources()
             try decoder.loadResources()
+            try encoder?.loadResources()
             try controlNet?.loadResources()
             try safetyChecker?.loadResources()
         }
@@ -111,6 +112,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         textEncoder.unloadResources()
         unet.unloadResources()
         decoder.unloadResources()
+        encoder?.unloadResources()
         controlNet?.unloadResources()
         safetyChecker?.unloadResources()
     }
@@ -120,6 +122,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         try textEncoder.prewarmResources()
         try unet.prewarmResources()
         try decoder.prewarmResources()
+        try encoder?.prewarmResources()
         try controlNet?.prewarmResources()
         try safetyChecker?.prewarmResources()
     }
@@ -162,6 +165,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
         // Generate random latent samples from specified seed
         var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+        if reduceMemory {
+            encoder?.unloadResources()
+        }
         let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
         
         // Convert cgImage for ControlNet into MLShapedArray
