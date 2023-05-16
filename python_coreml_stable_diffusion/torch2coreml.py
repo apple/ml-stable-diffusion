@@ -283,8 +283,8 @@ def convert_text_encoder(pipe, args):
     }
     logger.info(f"Sample inputs spec: {sample_text_encoder_inputs_spec}")
 
-    def _build_causal_attention_mask(self, bsz, seq_len, dtype):
-        mask = torch.ones((bsz, seq_len, seq_len), dtype=dtype) * -1e4
+    def _build_causal_attention_mask(self, bsz, seq_len, dtype, device=None):
+        mask = torch.ones((bsz, seq_len, seq_len), dtype=dtype, device=device) * -1e4
         mask.triu_(1)
         mask = mask.unsqueeze(1)
         return mask
