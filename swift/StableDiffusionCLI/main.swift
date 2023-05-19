@@ -7,7 +7,6 @@ import CoreML
 import Foundation
 import StableDiffusion
 import UniformTypeIdentifiers
-import Cocoa
 import CoreImage
 
 @available(iOS 16.2, macOS 13.1, *)
