@@ -162,7 +162,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
             switch config.schedulerType {
             case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount)
-            case .eulerAncestralDiscreteScheduler: return EulerAncestralDiscreteScheduler(randomSource: randomSource(from: config.rngType, seed: config.seed))
+            case .eulerAncestralDiscreteScheduler: return EulerAncestralDiscreteScheduler(randomSource: randomSource(from: config.rngType, seed: config.seed), stepCount: config.stepCount)
             }
         }
 

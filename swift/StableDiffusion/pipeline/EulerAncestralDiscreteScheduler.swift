@@ -59,7 +59,7 @@ public final class EulerAncestralDiscreteScheduler: Scheduler {
       
         self.initNoiseSigma = sigmas.max()!
         
-        self.timeSteps = linspace(0, Float(trainStepCount - 1), trainStepCount).reversed().map { Int(round($0)) }
+        self.timeSteps = linspace(0, Float(stepCount - 1), stepCount).reversed().map { Int(round($0)) }
     }
     
     public func step(output: MLShapedArray<Float32>, timeStep t: Int, sample s: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
