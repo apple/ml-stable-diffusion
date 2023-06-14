@@ -1,5 +1,7 @@
-coremltools
+coremltools>=7.0b1
 diffusers[torch]
 torch
-transformers
+transformers==4.29.2
 scipy
+scikit-learn
+pytest

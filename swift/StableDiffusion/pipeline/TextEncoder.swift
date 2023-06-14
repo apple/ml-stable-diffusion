@@ -4,9 +4,15 @@
 import Foundation
 import CoreML
 
+@available(iOS 16.2, macOS 13.1, *)
+public protocol TextEncoderModel: ResourceManaging {
+
+    func encode(_ text: String) throws -> MLShapedArray<Float32>
+}
+
 ///  A model for encoding text
 @available(iOS 16.2, macOS 13.1, *)
-public struct TextEncoder: ResourceManaging {
+public struct TextEncoder: TextEncoderModel {
 
     /// Text tokenizer
     var tokenizer: BPETokenizer
