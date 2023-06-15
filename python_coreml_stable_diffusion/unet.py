@@ -4,6 +4,7 @@
 #
 
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
+from python_coreml_stable_diffusion import attention
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers import ModelMixin
@@ -33,6 +34,7 @@ if not _macos_version() >= (13, 1):
 class AttentionImplementations(Enum):
     ORIGINAL = "ORIGINAL"
     SPLIT_EINSUM = "SPLIT_EINSUM"
+    SPLIT_EINSUM_V2 = "SPLIT_EINSUM_V2"
 
 
 ATTENTION_IMPLEMENTATION_IN_EFFECT = AttentionImplementations.SPLIT_EINSUM
@@ -95,64 +97,13 @@ class CrossAttention(nn.Module):
                 )
 
         if ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.ORIGINAL:
-            # This version of the attention function is recommended for high GPU core count
-            # devices such as the M1 Max and M1 Ultra
-            bs = q.size(0)
-            mh_q = q.view(bs, self.heads, self.dim_head, -1)
-            mh_k = k.view(bs, self.heads, self.dim_head, -1)
-            mh_v = v.view(bs, self.heads, self.dim_head, -1)
-
-            attn_weights = torch.einsum("bhcq,bhck->bhqk", [mh_q, mh_k])
-            attn_weights.mul_(self.scale)
-
-            if mask is not None:
-                attn_weights = attn_weights + mask
-
-            attn_weights = attn_weights.softmax(dim=3)
-
-            attn = torch.einsum("bhqk,bhck->bhcq", [attn_weights, mh_v])
-            attn = attn.contiguous().view(bs, self.heads * self.dim_head, 1,
-                                          -1)
+            attn = attention.original(q, k, v, mask, self.heads, self.dim_head)
 
         elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM:
-            # The split attention and einsum from https://machinelearning.apple.com/research/neural-engine-transformers
-            # are utilized to build an ANE implementation. This version is marginally slower on the GPU engine and is
-            # not recommended for Max and Ultra Mac variants
-            mh_q = [
-                q[:, head_idx * self.dim_head:(head_idx + 1) *
-                  self.dim_head, :, :] for head_idx in range(self.heads)
-            ]  # (bs, dim_head, 1, max_seq_length) * heads
+            attn = attention.split_einsum(q, k, v, mask, self.heads, self.dim_head)
 
-            k = k.transpose(1, 3)
-            mh_k = [
-                k[:, :, :,
-                  head_idx * self.dim_head:(head_idx + 1) * self.dim_head]
-                for head_idx in range(self.heads)
-            ]  # (bs, max_seq_length, 1, dim_head) * heads
-
-            mh_v = [
-                v[:, head_idx * self.dim_head:(head_idx + 1) *
-                  self.dim_head, :, :] for head_idx in range(self.heads)
-            ]  # (bs, dim_head, 1, max_seq_length) * heads
-
-            attn_weights = [
-                torch.einsum("bchq,bkhc->bkhq", [qi, ki]) * self.scale
-                for qi, ki in zip(mh_q, mh_k)
-            ]  # (bs, max_seq_length, 1, max_seq_length) * heads
-
-            if mask is not None:
-                for head_idx in range(self.heads):
-                    attn_weights[head_idx] = attn_weights[head_idx] + mask
-
-            attn_weights = [
-                aw.softmax(dim=1) for aw in attn_weights
-            ]  # (bs, max_seq_length, 1, max_seq_length) * heads
-            attn = [
-                torch.einsum("bkhq,bchk->bchq", wi, vi)
-                for wi, vi in zip(attn_weights, mh_v)
-            ]  # (bs, dim_head, 1, max_seq_length) * heads
-
-            attn = torch.cat(attn, dim=1)  # (bs, dim, 1, max_seq_length)
+        elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM_V2:
+            attn = attention.split_einsum_v2(q, k, v, mask, self.heads, self.dim_head)
 
         else:
             raise ValueError(ATTENTION_IMPLEMENTATION_IN_EFFECT)

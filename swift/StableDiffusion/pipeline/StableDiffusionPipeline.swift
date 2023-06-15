@@ -1,10 +1,11 @@
 // For licensing see accompanying LICENSE.md file.
 // Copyright (C) 2022 Apple Inc. All Rights Reserved.
 
-import Foundation
-import CoreML
 import Accelerate
 import CoreGraphics
+import CoreML
+import Foundation
+import NaturalLanguage
 
 /// Schedulers compatible with StableDiffusionPipeline
 public enum StableDiffusionScheduler {
@@ -31,10 +32,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
     
     public enum Error: String, Swift.Error {
         case startingImageProvidedWithoutEncoder
+        case unsupportedOSVersion
     }
     
     /// Model to generate embeddings for tokenized input text
-    var textEncoder: TextEncoder
+    var textEncoder: TextEncoderModel
 
     /// Model used to predict noise residuals given an input, diffusion time step, and conditional embedding
     var unet: Unet
@@ -64,6 +66,12 @@ public struct StableDiffusionPipeline: ResourceManaging {
     /// This will increase latency in favor of reducing memory
     var reduceMemory: Bool = false
 
+    /// Option to use system multilingual NLContextualEmbedding as encoder
+    var useMultilingualTextEncoder: Bool = false
+
+    /// Optional natural language script to use for the text encoder.
+    var script: Script? = nil
+
     /// Creates a pipeline using the specified models and tokenizer
     ///
     /// - Parameters:
@@ -74,13 +82,15 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - safetyChecker: Optional model for checking safety of generated images
     ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
-    public init(textEncoder: TextEncoder,
-                unet: Unet,
-                decoder: Decoder,
-                encoder: Encoder?,
-                controlNet: ControlNet? = nil,
-                safetyChecker: SafetyChecker? = nil,
-                reduceMemory: Bool = false) {
+    public init(
+        textEncoder: TextEncoderModel,
+        unet: Unet,
+        decoder: Decoder,
+        encoder: Encoder?,
+        controlNet: ControlNet? = nil,
+        safetyChecker: SafetyChecker? = nil,
+        reduceMemory: Bool = false
+    ) {
         self.textEncoder = textEncoder
         self.unet = unet
         self.decoder = decoder
@@ -88,6 +98,41 @@ public struct StableDiffusionPipeline: ResourceManaging {
         self.controlNet = controlNet
         self.safetyChecker = safetyChecker
         self.reduceMemory = reduceMemory
+    }
+
+    /// Creates a pipeline using the specified models and tokenizer
+    ///
+    /// - Parameters:
+    ///   - textEncoder: Model for encoding tokenized text
+    ///   - unet: Model for noise prediction on latent samples
+    ///   - decoder: Model for decoding latent sample to image
+    ///   - controlNet: Optional model to control generated images by additonal inputs
+    ///   - safetyChecker: Optional model for checking safety of generated images
+    ///   - reduceMemory: Option to enable reduced memory mode
+    ///   - useMultilingualTextEncoder: Option to use system multilingual NLContextualEmbedding as encoder
+    ///   - script: Optional natural language script to use for the text encoder.
+    /// - Returns: Pipeline ready for image generation
+    @available(iOS 17.0, macOS 14.0, *)
+    public init(
+        textEncoder: TextEncoderModel,
+        unet: Unet,
+        decoder: Decoder,
+        encoder: Encoder?,
+        controlNet: ControlNet? = nil,
+        safetyChecker: SafetyChecker? = nil,
+        reduceMemory: Bool = false,
+        useMultilingualTextEncoder: Bool = false,
+        script: Script? = nil
+    ) {
+        self.textEncoder = textEncoder
+        self.unet = unet
+        self.decoder = decoder
+        self.encoder = encoder
+        self.controlNet = controlNet
+        self.safetyChecker = safetyChecker
+        self.reduceMemory = reduceMemory
+        self.useMultilingualTextEncoder = useMultilingualTextEncoder
+        self.script = script
     }
 
     /// Load required resources for this pipeline
@@ -98,8 +143,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
         if reduceMemory {
             try prewarmResources()
         } else {
-            try textEncoder.loadResources()
             try unet.loadResources()
+            try textEncoder.loadResources()
             try decoder.loadResources()
             try encoder?.loadResources()
             try controlNet?.loadResources()
@@ -153,7 +198,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
             alongAxis: 0
         )
 
-        let hiddenStates = toHiddenStates(concatEmbedding)
+        let hiddenStates = useMultilingualTextEncoder ? concatEmbedding : toHiddenStates(concatEmbedding)
 
         /// Setup schedulers
         let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in

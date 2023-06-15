@@ -3,7 +3,9 @@
 # Copyright (C) 2022 Apple Inc. All Rights Reserved.
 #
 
-from python_coreml_stable_diffusion import unet, controlnet
+from python_coreml_stable_diffusion import (
+    unet, controlnet, chunk_mlprogram
+)
 
 import argparse
 from collections import OrderedDict, defaultdict
@@ -20,7 +22,6 @@ logger.setLevel(logging.INFO)
 
 import numpy as np
 import os
-from python_coreml_stable_diffusion import chunk_mlprogram
 import requests
 import shutil
 import time
@@ -141,30 +142,49 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
     return coreml_model, out_path
 
 
-def quantize_weights_to_8bits(args):
-    for model_name in [
-            "text_encoder", "vae_decoder", "vae_encoder", "unet", "unet_chunk1", "unet_chunk2", 
-            "control-unet", "control-unet_chunk1", "control-unet_chunk2", "safety_checker"
-    ]:
+def quantize_weights(args):
+    """ Quantize weights to args.quantize_nbits using a palette (look-up table)
+    """
+    for model_name in ["text_encoder", "unet", "control-unet"]:
+        logger.info(f"Quantizing {model_name} to {args.quantize_nbits}-bit precision")
         out_path = _get_out_path(args, model_name)
-        _quantize_and_save_8bits_model(out_path, model_name)
+        _quantize_weights(
+            out_path,
+            model_name,
+            args.quantize_nbits
+        )
 
     if args.convert_controlnet:
         for controlnet_model_version in args.convert_controlnet:
             controlnet_model_name = controlnet_model_version.replace("/", "_")
+            logger.info(f"Quantizing {controlnet_model_name} to {args.quantize_nbits}-bit precision")
             fname = f"ControlNet_{controlnet_model_name}.mlpackage"
             out_path = os.path.join(args.o, fname)
-            _quantize_and_save_8bits_model(out_path, controlnet_model_name)
-            
+            _quantize_weights(
+                out_path,
+                controlnet_model_name,
+                args.quantize_nbits
+            )
 
-def _quantize_and_save_8bits_model(out_path, model_name):
+def _quantize_weights(out_path, model_name, nbits):
     if os.path.exists(out_path):
         logger.info(f"Quantizing {model_name}")
         mlmodel = ct.models.MLModel(out_path,
                                     compute_units=ct.ComputeUnit.CPU_ONLY)
-        mlmodel = ct.compression_utils.affine_quantize_weights(
-            mlmodel, mode="linear")
-        mlmodel.save(out_path)
+
+        op_config = ct.optimize.coreml.OpPalettizerConfig(
+            mode="kmeans",
+            nbits=nbits,
+        )
+
+        config = ct.optimize.coreml.OptimizationConfig(
+            global_config=op_config,
+            op_type_configs={
+                "gather": None # avoid quantizing the embedding table
+            }
+        )
+
+        model = ct.optimize.coreml.palettize_weights(mlmodel, config=config).save(out_path)
         logger.info("Done")
     else:
         logger.info(
@@ -266,7 +286,7 @@ def convert_text_encoder(pipe, args):
 
     # Create sample inputs for tracing, conversion and correctness verification
     text_encoder_sequence_length = pipe.tokenizer.model_max_length
-    text_encoder_hidden_size = pipe.text_encoder.config.hidden_size
+    text_encoder_hidden_size = args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size
 
     sample_text_encoder_inputs = {
         "input_ids":
@@ -618,9 +638,9 @@ def convert_unet(pipe, args):
 
         encoder_hidden_states_shape = (
             batch_size,
-            pipe.text_encoder.config.hidden_size,
+            args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size,
             1,
-            pipe.text_encoder.config.max_position_embeddings,
+            args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
         )
 
         # Create the scheduled timesteps for downstream use
@@ -739,6 +759,10 @@ def convert_unet(pipe, args):
         coreml_unet.output_description["noise_pred"] = \
             "Same shape and dtype as the `sample` input. " \
             "The predicted noise to facilitate the reverse diffusion (denoising) process"
+
+        # Set package version metadata
+        from python_coreml_stable_diffusion._version import __version__
+        coreml_unet.user_defined_metadata["com.github.apple.ml-stable-diffusion.version"] = __version__
 
         _save_mlpackage(coreml_unet, out_path)
         logger.info(f"Saved unet into {out_path}")
@@ -1009,9 +1033,9 @@ def convert_controlnet(pipe, args):
 
             encoder_hidden_states_shape = (
                 batch_size,
-                pipe.text_encoder.config.hidden_size,
+                args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size,
                 1,
-                pipe.text_encoder.config.max_position_embeddings,
+                args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
             )
 
             controlnet_cond_shape = (
@@ -1068,18 +1092,10 @@ def convert_controlnet(pipe, args):
             baseline_out = original_controlnet(**baseline_sample_controlnet_inputs,
                                      return_dict=False)
             reference_out = reference_controlnet(*sample_controlnet_inputs.values())
-
-            baseline_down_residuals, baseline_mid_residuals = baseline_out
-            baseline_out = baseline_down_residuals + (baseline_mid_residuals,)
-            reference_down_residuals, reference_mid_residuals = reference_out
-            reference_out = reference_down_residuals +(reference_mid_residuals,)
-
-            for key, b_out, r_out in zip(output_keys, baseline_out, reference_out):
-                b_out = b_out.numpy()
-                r_out = r_out.numpy()
-                logger.info(f"Check {key} correctness")
-                report_correctness(b_out, r_out,
-                                f"controlnet({controlnet_model_name}) baseline to reference PyTorch")
+            report_correctness(
+                baseline_out[-1].numpy(),
+                reference_out[-1].numpy(),
+                f"{controlnet_model_name} baseline to reference PyTorch")
 
         del original_controlnet
         gc.collect()
@@ -1128,12 +1144,12 @@ def convert_controlnet(pipe, args):
         # Parity check PyTorch vs CoreML
         if args.check_output_correctness:
             coreml_out = coreml_controlnet.predict(coreml_sample_controlnet_inputs)
-            for key, b_out in zip(output_keys, baseline_out):
-                b_out = b_out.numpy()
-                logger.info(f"Check {key} correctness")
-                report_correctness(b_out, coreml_out[key],
-                                "controlnet baseline PyTorch to reference CoreML")
-        
+            report_correctness(
+                baseline_out[-1].numpy(),
+                coreml_out[output_keys[-1]],
+                "controlnet baseline PyTorch to reference CoreML"
+            )
+
         del coreml_controlnet
         gc.collect()
 
@@ -1186,16 +1202,15 @@ def main(args):
         convert_safety_checker(pipe, args)
         logger.info("Converted safety_checker")
 
+    if args.quantize_nbits is not None:
+        logger.info(f"Quantizing weights to {args.quantize_nbits}-bit precision")
+        quantize_weights(args)
+        logger.info(f"Quantized weights to {args.quantize_nbits}-bit precision")
+
     if args.bundle_resources_for_swift_cli:
         logger.info("Bundling resources for the Swift CLI")
         bundle_resources_for_swift_cli(args)
         logger.info("Bundled resources for the Swift CLI")
-
-    if args.quantize_weights_to_8bits:
-        # Note: Not recommended, significantly degrades generated image quality
-        logger.info("Quantizing weights to 8-bit precision")
-        quantize_weights_to_8bits(args)
-        logger.info("Quantized weights to 8-bit precision")
 
 
 def parser_spec():
@@ -1242,6 +1257,20 @@ def parser_spec():
         "The spatial resolution (number of cols) of the latent space. `Defaults to pipe.unet.config.sample_size`",
     )
     parser.add_argument(
+        "--text-token-sequence-length",
+        type=int,
+        default=None,
+        help=
+        "The token sequence length for the text encoder. `Defaults to pipe.text_encoder.config.max_position_embeddings`",
+    )
+    parser.add_argument(
+        "--text-encoder-hidden-size",
+        type=int,
+        default=None,
+        help=
+        "The hidden size for the text encoder. `Defaults to pipe.text_encoder.config.hidden_size`",
+    )
+    parser.add_argument(
         "--attention-implementation",
         choices=tuple(ai
                       for ai in unet.AttentionImplementations._member_names_),
@@ -1268,12 +1297,12 @@ def parser_spec():
         "This is required for ANE deployment on iOS and iPadOS. Not required for macOS."
         )
     parser.add_argument(
-        "--quantize-weights-to-8bits",
-        action="store_true",
-        help=
-        "If specified, quantize 16-bits weights to 8-bits weights in-place for all models. "
-        "Not recommended as the generated image quality degraded significantly after 8-bit weight quantization"
-        )
+        "--quantize-nbits",
+        default=None,
+        choices=(2, 4, 6, 8),
+        type=int,
+        help="If specified, quantized each model to nbits precision"
+    )
     parser.add_argument(
         "--unet-support-controlnet",
         action="store_true",

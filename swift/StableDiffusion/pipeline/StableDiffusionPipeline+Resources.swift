@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreML
+import NaturalLanguage
 
 @available(iOS 16.2, macOS 13.1, *)
 public extension StableDiffusionPipeline {
@@ -22,6 +23,7 @@ public extension StableDiffusionPipeline {
         public let controlledUnetURL: URL
         public let controlledUnetChunk1URL: URL
         public let controlledUnetChunk2URL: URL
+        public let multilingualTextEncoderProjectionURL: URL
 
         public init(resourcesAt baseURL: URL) {
             textEncoderURL = baseURL.appending(path: "TextEncoder.mlmodelc")
@@ -37,6 +39,7 @@ public extension StableDiffusionPipeline {
             controlledUnetURL = baseURL.appending(path: "ControlledUnet.mlmodelc")
             controlledUnetChunk1URL = baseURL.appending(path: "ControlledUnetChunk1.mlmodelc")
             controlledUnetChunk2URL = baseURL.appending(path: "ControlledUnetChunk2.mlmodelc")
+            multilingualTextEncoderProjectionURL = baseURL.appending(path: "MultilingualTextEncoderProjection.mlmodelc")
         }
     }
 
@@ -44,29 +47,40 @@ public extension StableDiffusionPipeline {
     /// specified URL
     ///
     /// - Parameters:
-    ///    - baseURL: URL pointing to directory holding all model
-    ///               and tokenization resources
+    ///   - baseURL: URL pointing to directory holding all model and tokenization resources
     ///   - controlNetModelNames: Specify ControlNet models to use in generation
     ///   - configuration: The configuration to load model resources with
     ///   - disableSafety: Load time disable of safety to save memory
     ///   - reduceMemory: Setup pipeline in reduced memory mode
+    ///   - useMultilingualTextEncoder: Option to use system multilingual NLContextualEmbedding as encoder
+    ///   - script: Optional natural language script to use for the text encoder.
     /// - Returns:
     ///  Pipeline ready for image generation if all  necessary resources loaded
-    init(resourcesAt baseURL: URL,
-         controlNet controlNetModelNames: [String],
-         configuration config: MLModelConfiguration = .init(),
-         disableSafety: Bool = false,
-         reduceMemory: Bool = false) throws {
+    init(
+        resourcesAt baseURL: URL,
+        controlNet controlNetModelNames: [String],
+        configuration config: MLModelConfiguration = .init(),
+        disableSafety: Bool = false,
+        reduceMemory: Bool = false,
+        useMultilingualTextEncoder: Bool = false,
+        script: Script? = nil
+    ) throws {
 
         /// Expect URL of each resource
         let urls = ResourceURLs(resourcesAt: baseURL)
+        let textEncoder: TextEncoderModel
+        if useMultilingualTextEncoder {
+            guard #available(macOS 14.0, iOS 17.0, *) else { throw Error.unsupportedOSVersion }
+            textEncoder = MultilingualTextEncoder(
+                modelAt: urls.multilingualTextEncoderProjectionURL,
+                configuration: config,
+                script: script ?? .latin
+            )
+        } else {
+            let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
+            textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+        }
 
-        // Text tokenizer and encoder
-        let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
-        let textEncoder = TextEncoder(tokenizer: tokenizer,
-                                      modelAt: urls.textEncoderURL,
-                                      configuration: config)
-        
         // ControlNet model
         var controlNet: ControlNet? = nil
         let controlNetURLs = controlNetModelNames.map { model in
@@ -119,12 +133,28 @@ public extension StableDiffusionPipeline {
         }
 
         // Construct pipeline
-        self.init(textEncoder: textEncoder,
-                  unet: unet,
-                  decoder: decoder,
-                  encoder: encoder,
-                  controlNet: controlNet,
-                  safetyChecker: safetyChecker,
-                  reduceMemory: reduceMemory)
+        if #available(macOS 14.0, iOS 17.0, *) {
+            self.init(
+                textEncoder: textEncoder,
+                unet: unet,
+                decoder: decoder,
+                encoder: encoder,
+                controlNet: controlNet,
+                safetyChecker: safetyChecker,
+                reduceMemory: reduceMemory,
+                useMultilingualTextEncoder: useMultilingualTextEncoder,
+                script: script
+            )
+        } else {
+            self.init(
+                textEncoder: textEncoder,
+                unet: unet,
+                decoder: decoder,
+                encoder: encoder,
+                controlNet: controlNet,
+                safetyChecker: safetyChecker,
+                reduceMemory: reduceMemory
+            )
+        }
     }
 }
