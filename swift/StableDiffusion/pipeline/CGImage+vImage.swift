@@ -111,7 +111,7 @@ extension CGImage {
             let destBPtr = destinationB.data.assumingMemoryBound(to: Float.self)
 
             for i in 0..<Int(width) * Int(height) {
-                if destAPtr.advanced(by: i).pointee < 1 {
+                if destAPtr.advanced(by: i).pointee == 0 {
                     destRPtr.advanced(by: i).pointee = -1
                     destGPtr.advanced(by: i).pointee = -1
                     destBPtr.advanced(by: i).pointee = -1
