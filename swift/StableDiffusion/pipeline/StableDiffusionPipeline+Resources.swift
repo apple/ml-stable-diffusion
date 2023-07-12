@@ -69,6 +69,8 @@ public extension StableDiffusionPipeline {
         /// Expect URL of each resource
         let urls = ResourceURLs(resourcesAt: baseURL)
         let textEncoder: TextEncoderModel
+
+#if canImport(NaturalLanguage.NLScript)
         if useMultilingualTextEncoder {
             guard #available(macOS 14.0, iOS 17.0, *) else { throw Error.unsupportedOSVersion }
             textEncoder = MultilingualTextEncoder(
@@ -80,6 +82,10 @@ public extension StableDiffusionPipeline {
             let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
             textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
         }
+#else
+        let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
+        textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+#endif
 
         // ControlNet model
         var controlNet: ControlNet? = nil
