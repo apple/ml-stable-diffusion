@@ -253,6 +253,9 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
             noise = performGuidance(noise, config.guidanceScale)
 
+            // Retreive denoised latents from scheduler to pass into progress report
+            var denoisedLatents: [MLShapedArray<Float32>] = []
+
             // Have the scheduler compute the previous (t-1) latent
             // sample given the predicted noise and current sample
             for i in 0..<config.imageCount {
@@ -261,6 +264,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
                     timeStep: t,
                     sample: latents[i]
                 )
+
+                denoisedLatents.append(scheduler[i].modelOutputs.last ?? latents[i])
             }
 
             // Report progress
@@ -269,7 +274,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 prompt: config.prompt,
                 step: step,
                 stepCount: timeSteps.count,
-                currentLatentSamples: latents,
+                currentLatentSamples: denoisedLatents,
                 configuration: config
             )
             if !progressHandler(progress) {

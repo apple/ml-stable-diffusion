@@ -30,6 +30,9 @@ public protocol Scheduler {
     /// Standard deviation of the initial noise distribution
     var initNoiseSigma: Float { get }
 
+    /// Denoised latents
+    var modelOutputs: [MLShapedArray<Float32>] { get }
+
     /// Compute a de-noised image sample and step scheduler state
     ///
     /// - Parameters:
@@ -139,6 +142,12 @@ public final class PNDMScheduler: Scheduler {
     public let alphasCumProd: [Float]
     public let timeSteps: [Int]
 
+    public let alpha_t: [Float]
+    public let sigma_t: [Float]
+    public let lambda_t: [Float]
+
+    public private(set) var modelOutputs: [MLShapedArray<Float32>] = []
+
     // Internal state
     var counter: Int
     var ets: [MLShapedArray<Float32>]
@@ -180,6 +189,10 @@ public final class PNDMScheduler: Scheduler {
         let forwardSteps = (0..<stepCount).map {
             Int((Float($0) * stepRatio).rounded()) + stepsOffset
         }
+
+        self.alpha_t = vForce.sqrt(self.alphasCumProd)
+        self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
+        self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
 
         var timeSteps: [Int] = []
         timeSteps.append(contentsOf: forwardSteps.dropLast(1))
@@ -251,9 +264,32 @@ public final class PNDMScheduler: Scheduler {
             )
         }
 
+        let convertedOutput = convertModelOutput(modelOutput: modelOutput, timestep: timeStep, sample: sample)
+        modelOutputs.append(convertedOutput)
+
         let prevSample = previousSample(sample, timeStep, prevStep, modelOutput)
+
         counter += 1
         return prevSample
+    }
+
+    /// Convert the model output to the corresponding type the algorithm needs.
+    /// This implementation is for second-order DPM-Solver++ assuming epsilon prediction.
+    func convertModelOutput(modelOutput: MLShapedArray<Float32>, timestep: Int, sample: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
+        assert(modelOutput.scalarCount == sample.scalarCount)
+        let scalarCount = modelOutput.scalarCount
+        let (alpha_t, sigma_t) = (self.alpha_t[timestep], self.sigma_t[timestep])
+
+        return MLShapedArray(unsafeUninitializedShape: modelOutput.shape) { scalars, _ in
+            assert(scalars.count == scalarCount)
+            modelOutput.withUnsafeShapedBufferPointer { modelOutput, _, _ in
+                sample.withUnsafeShapedBufferPointer { sample, _, _ in
+                    for i in 0 ..< scalarCount {
+                        scalars.initializeElement(at: i, to: (sample[i] - modelOutput[i] * sigma_t) / alpha_t)
+                    }
+                }
+            }
+        }
     }
 
     /// Compute  sample (denoised image) at previous step given a current time step
