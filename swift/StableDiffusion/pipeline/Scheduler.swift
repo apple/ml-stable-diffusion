@@ -274,7 +274,6 @@ public final class PNDMScheduler: Scheduler {
     }
 
     /// Convert the model output to the corresponding type the algorithm needs.
-    /// This implementation is for second-order DPM-Solver++ assuming epsilon prediction.
     func convertModelOutput(modelOutput: MLShapedArray<Float32>, timestep: Int, sample: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
         assert(modelOutput.scalarCount == sample.scalarCount)
         let scalarCount = modelOutput.scalarCount
