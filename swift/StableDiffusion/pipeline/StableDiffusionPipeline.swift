@@ -265,8 +265,12 @@ public struct StableDiffusionPipeline: ResourceManaging {
                     sample: latents[i]
                 )
 
-                denoisedLatents.append(scheduler[i].modelOutputs.last ?? latents[i])
+                if let denoisedLatent = scheduler[i].modelOutputs.last {
+                    denoisedLatents.append(denoisedLatent)
+                }
             }
+
+            let currentLatentSamples = config.useDenoisedIntermediates ? denoisedLatents : latents
 
             // Report progress
             let progress = Progress(
@@ -274,7 +278,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
                 prompt: config.prompt,
                 step: step,
                 stepCount: timeSteps.count,
-                currentLatentSamples: denoisedLatents,
+                currentLatentSamples: currentLatentSamples,
                 configuration: config
             )
             if !progressHandler(progress) {
