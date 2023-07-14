@@ -37,6 +37,8 @@ extension StableDiffusionPipeline {
         public var controlNetInputs: [CGImage] = []
         /// Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
         public var disableSafety: Bool = false
+        /// Enables progress updates to decode `currentImages` from denoised latent images for better previews
+        public var useDenoisedIntermediates: Bool = false
         /// The type of Scheduler to use.
         public var schedulerType: StableDiffusionScheduler = .pndmScheduler
         /// The type of RNG to use
