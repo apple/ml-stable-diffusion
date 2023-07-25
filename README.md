@@ -253,6 +253,8 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--unet-support-controlnet`: enables a converted UNet model to receive additional inputs from ControlNet. This is required for generating image with using ControlNet and saved with a different name, `*_control-unet.mlpackage`, distinct from normal UNet. On the other hand, this UNet model can not work without ControlNet. Please use normal UNet for just txt2img.
 
+- `--pipeline-type`: Defaults to `SD` which will use the standard Stable Diffusion pipeline. `--pipeline-type SDXL` will convert the models for Stable Diffusion XL.
+
 </details>
 
 ## <a name="image-generation-with-python"></a> Image Generation with Python

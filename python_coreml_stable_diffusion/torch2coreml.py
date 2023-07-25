@@ -11,7 +11,7 @@ import argparse
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 import coremltools as ct
-from diffusers import StableDiffusionPipeline, ControlNetModel
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, ControlNetModel, UNet2DConditionModel
 import gc
 
 import logging
@@ -42,7 +42,7 @@ def _get_coreml_inputs(sample_inputs, args):
         ct.TensorType(
             name=k,
             shape=v.shape,
-            dtype=v.numpy().dtype if isinstance(v, torch.Tensor) else v.dtype,
+            dtype=v.cpu().numpy().dtype if isinstance(v, torch.Tensor) else v.dtype,
         ) for k, v in sample_inputs.items()
     ]
 
@@ -102,7 +102,7 @@ def _save_mlpackage(model, output_path):
 
 
 def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
-                       output_names, args, out_path=None):
+                       output_names, args, out_path=None, precision=ct.precision.FLOAT16):
 
     if out_path is None:
         out_path = _get_out_path(args, submodule_name)
@@ -130,7 +130,8 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
             inputs=_get_coreml_inputs(sample_inputs, args),
             outputs=[ct.TensorType(name=name) for name in output_names],
             compute_units=ct.ComputeUnit[args.compute_unit],
-            # skip_model_load=True,
+            compute_precision=precision,
+            skip_model_load=not args.check_output_correctness,
         )
 
         del torchscript_module
@@ -145,7 +146,7 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
 def quantize_weights(args):
     """ Quantize weights to args.quantize_nbits using a palette (look-up table)
     """
-    for model_name in ["text_encoder", "unet", "control-unet"]:
+    for model_name in ["text_encoder", "text_encoder_2", "unet", "control-unet"]:
         logger.info(f"Quantizing {model_name} to {args.quantize_nbits}-bit precision")
         out_path = _get_out_path(args, model_name)
         _quantize_weights(
@@ -223,6 +224,7 @@ def bundle_resources_for_swift_cli(args):
 
     # Compile model using coremlcompiler (Significantly reduces the load time for unet)
     for source_name, target_name in [("text_encoder", "TextEncoder"),
+                                     ("text_encoder_2", "TextEncoder2"),
                                      ("vae_decoder", "VAEDecoder"),
                                      ("vae_encoder", "VAEEncoder"),
                                      ("unet", "Unet"),
@@ -336,12 +338,20 @@ def convert_text_encoder(pipe, args):
         ["last_hidden_state", "pooled_outputs"], args)
 
     # Set model metadata
+    if args.is_sdxl:
+        coreml_text_encoder.license = f"Please refer to the Model Card available at huggingface.co/{args.model_version}/blob/main/LICENSE.md"
+        coreml_text_encoder.short_description = \
+            "This is a model that can be used to generate and modify images based on text prompts." \
+            "It is a Latent Diffusion Model that uses two fixed, pretrained text encoders (OpenCLIP-ViT/G and CLIP-ViT/L)." \
+            "Please refer to https://arxiv.org/abs/2307.01952 for details"
+    else:
+        coreml_text_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_text_encoder.short_description = \
+            "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
+            "Please refer to https://arxiv.org/abs/2112.10752 for details."
+
     coreml_text_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_text_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_text_encoder.version = args.model_version
-    coreml_text_encoder.short_description = \
-        "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
-        "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
     coreml_text_encoder.input_description[
@@ -373,6 +383,115 @@ def convert_text_encoder(pipe, args):
             "text_encoder baseline PyTorch to reference CoreML")
 
     del reference_text_encoder, coreml_text_encoder, pipe.text_encoder
+    gc.collect()
+
+def convert_text_encoder_xl(pipe, args, text_encoder_name):
+    """ Converts the text encoder component of Stable Diffusion XL
+    """
+    out_path = _get_out_path(args, text_encoder_name)
+    if os.path.exists(out_path):
+        logger.info(
+            f"`{text_encoder_name}` already exists at {out_path}, skipping conversion."
+        )
+        return
+    
+    reference_text_encoder = getattr(pipe, text_encoder_name)
+    reference_text_encoder.to(args.device)
+    reference_text_encoder.config.layer_norm_eps = np.float16(reference_text_encoder.config.layer_norm_eps)
+
+    # Create sample inputs for tracing, conversion and correctness verification
+    text_encoder_sequence_length = pipe.tokenizer.model_max_length
+    text_encoder_hidden_size = args.text_encoder_hidden_size or reference_text_encoder.config.hidden_size
+
+    sample_text_encoder_inputs = {
+        "input_ids":
+        torch.randint(
+            reference_text_encoder.config.vocab_size,
+            (1, text_encoder_sequence_length),
+            # https://github.com/apple/coremltools/issues/1423
+            dtype=torch.int32,
+        ).to(args.device)
+    }
+    sample_text_encoder_inputs_spec = {
+        k: (v.shape, v.dtype)
+        for k, v in sample_text_encoder_inputs.items()
+    }
+    logger.info(f"Sample inputs spec: {sample_text_encoder_inputs_spec}")
+
+    def _build_causal_attention_mask(self, bsz, seq_len, dtype, device=None):
+        mask = torch.ones((bsz, seq_len, seq_len), dtype=dtype, device=device) * -1e4
+        mask.triu_(1)
+        mask = mask.unsqueeze(1)
+        return mask.to(args.device)
+
+    class TextEncoderXL(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.text_encoder = reference_text_encoder.to(args.device)
+            setattr(
+                self.text_encoder.text_model, "_build_causal_attention_mask",
+                MethodType(_build_causal_attention_mask,
+                           self.text_encoder.text_model))
+
+        def forward(self, input_ids):
+            result = self.text_encoder(input_ids, output_hidden_states=True)
+            return (result.hidden_states[-2], result[0])
+
+    reference_text_encoder = TextEncoderXL().eval()
+    reference_text_encoder.to(args.device)
+
+    logger.info(f"JIT tracing {text_encoder_name}..")
+    reference_text_encoder = torch.jit.trace(
+        reference_text_encoder,
+        (sample_text_encoder_inputs["input_ids"], ),
+    )
+    logger.info("Done.")
+
+    coreml_text_encoder, out_path = _convert_to_coreml(
+        text_encoder_name, reference_text_encoder, sample_text_encoder_inputs,
+        ["last_hidden_state", "pooled_outputs"], args)
+
+    # Set model metadata
+    coreml_text_encoder.license = f"Please refer to the Model Card available at huggingface.co/{args.model_version}/blob/main/LICENSE.md"
+    coreml_text_encoder.short_description = \
+        "This is a model that can be used to generate and modify images based on text prompts." \
+        "It is a Latent Diffusion Model that uses two fixed, pretrained text encoders (OpenCLIP-ViT/G and CLIP-ViT/L)." \
+        "Please refer to https://arxiv.org/abs/2307.01952 for details"
+
+    coreml_text_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
+    coreml_text_encoder.version = args.model_version
+
+    # Set the input descriptions
+    coreml_text_encoder.input_description[
+        "input_ids"] = "The token ids that represent the input text"
+
+    # Set the output descriptions
+    coreml_text_encoder.output_description[
+        "last_hidden_state"] = "The token embeddings as encoded by the Transformer model"
+    coreml_text_encoder.output_description[
+        "pooled_outputs"] = "The version of the `last_hidden_state` output after pooling"
+
+    _save_mlpackage(coreml_text_encoder, out_path)
+
+    logger.info(f"Saved text_encoder into {out_path}")
+
+    # Parity check PyTorch vs CoreML
+    if args.check_output_correctness:
+        baseline_out = pipe.text_encoder(
+            sample_text_encoder_inputs["input_ids"].to(torch.int32),
+            return_dict=False,
+        )[1].numpy()
+
+        coreml_out = list(
+            coreml_text_encoder.predict(
+                {k: v.numpy()
+                 for k, v in sample_text_encoder_inputs.items()}).values())[0]
+        report_correctness(
+            baseline_out, coreml_out,
+            "text_encoder baseline PyTorch to reference CoreML")
+
+    del reference_text_encoder, coreml_text_encoder
+    delattr(pipe, text_encoder_name)
     gc.collect()
 
 
@@ -424,6 +543,84 @@ def modify_coremltools_torch_frontend_badbmm():
         context.add(baddbmm_node)
 
 
+def modify_coremltools_torch_frontend_scaled_dot_product_attention():
+    """
+    Modifies coremltools torch frontend for scaled_dot_product_attention having 7 inputs instead of 6:
+    """
+    import math as _math
+    from coremltools.converters.mil import register_torch_op
+    from coremltools.converters.mil.mil import Builder as mb
+    from coremltools.converters.mil.frontend.torch.ops import _get_inputs, _get_attn_mask
+    from coremltools.converters.mil.frontend.torch.torch_op_registry import _TORCH_OPS_REGISTRY
+    from coremltools.converters.mil.mil.types.symbolic import is_symbolic
+    if "scaled_dot_product_attention" in _TORCH_OPS_REGISTRY:
+        del _TORCH_OPS_REGISTRY["scaled_dot_product_attention"]
+
+    @register_torch_op
+    def scaled_dot_product_attention(context, node):
+        """
+        Input shapes/types:
+        - query : (target_seq, d) or (B, target_seq, d) or (B, h, target_seq, d) or (B,.., target_seq, d)
+        - key : (source_seq, d) or (B, source_seq, d) or (B, h, source_seq, d) or (B,.., source_seq, d)
+        - value: (source_seq, d_v) or (B, source_seq, d_v) or (B, h, source_seq, d_v) or (B,.., source_seq, d_v)
+        - attn_mask : (target_seq, source_seq) or (B, target_seq, source_seq) or (B, h, target_seq, source_seq) or
+                    (B, ..., target_seq, source_seq)
+        - is_causal : bool
+
+        Output shape: (target_seq, d_v) or (B,...,target_seq, d_v)
+
+        output = softmax(scale*Q*K^transpose + mask) * V
+
+        See details at:
+        https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+        """
+        q, k, v, attn_mask, dropout, is_causal, empty = _get_inputs(context, node, expected=7)
+        if attn_mask is not None and is_causal.val:
+            raise ValueError(
+                "scaled_dot_product_attention op: attn_mask cannot be provided when is_causal is set to True."
+            )
+
+        # check that ranks of q, k, v and attn_mask match
+        if k.rank != q.rank:
+            raise ValueError(
+                "Rank of query and key do not match in scaled_dot_product_attention torch op"
+            )
+        if v.rank != q.rank:
+            raise ValueError(
+                "Rank of query and value do not match in scaled_dot_product_attention torch op"
+            )
+
+        is_mask_present = False
+        if is_causal.val or attn_mask is not None:
+            is_mask_present = True
+            mask = _get_attn_mask(is_causal, attn_mask, q, k)
+
+        # scale the query input
+        embed_size = q.shape[-1]
+        if is_symbolic(embed_size):
+            raise ValueError(
+                "The embedding size, i.e. last dimension of the shape of query tensor"
+                " cannot be symbolic, in scaled_dot_product_attention op"
+            )
+        multiplicative_scale_factor = 1 / _math.sqrt(embed_size)
+        q = mb.mul(x=q, y=multiplicative_scale_factor)
+
+        # multiply query and key input tensors
+        # shape of output: (target_seq, source_seq) or (B,...,target_seq, source_seq)
+        attn_weights = mb.matmul(x=q, y=k, transpose_y=True)
+
+        # add mask if applicable
+        if is_mask_present:
+            attn_weights = mb.add(x=attn_weights, y=mask)
+
+        # do softmax
+        attn_weights_normalized = mb.softmax(x=attn_weights, axis=-1)
+
+        # multiply attn_weights and value tensor
+        res = mb.matmul(x=attn_weights_normalized, y=v, name=node.name)
+        context.add(res)
+
+
 def convert_vae_decoder(pipe, args):
     """ Converts the VAE Decoder component of Stable Diffusion
     """
@@ -447,8 +644,10 @@ def convert_vae_decoder(pipe, args):
     )
 
     sample_vae_decoder_inputs = {
-        "z": torch.rand(*z_shape, dtype=torch.float16)
+        "z": torch.rand(*z_shape).to("cpu")
     }
+
+    reference_vae = pipe.vae.to("cpu")
 
     class VAEDecoder(nn.Module):
         """ Wrapper nn.Module wrapper for pipe.decode() method
@@ -456,10 +655,8 @@ def convert_vae_decoder(pipe, args):
 
         def __init__(self):
             super().__init__()
-            self.post_quant_conv = pipe.vae.post_quant_conv
-            self.decoder = pipe.vae.decoder
-            # Disable torch 2.0 scaled dot-product attention: https://github.com/apple/coremltools/issues/1823
-            self.decoder.mid_block.attentions[0]._use_2_0_attn = False
+            self.post_quant_conv = reference_vae.post_quant_conv
+            self.decoder = reference_vae.decoder
 
         def forward(self, z):
             return self.decoder(self.post_quant_conv(z))
@@ -471,17 +668,27 @@ def convert_vae_decoder(pipe, args):
         baseline_decoder, (sample_vae_decoder_inputs["z"].to(torch.float32), ))
 
     modify_coremltools_torch_frontend_badbmm()
+    modify_coremltools_torch_frontend_scaled_dot_product_attention()
     coreml_vae_decoder, out_path = _convert_to_coreml(
         "vae_decoder", traced_vae_decoder, sample_vae_decoder_inputs,
-        ["image"], args)
+        ["image"], args,
+        precision=ct.precision.FLOAT32) # VAE Decoder requires float32 precision or else it overflows
 
     # Set model metadata
+    if args.is_sdxl:
+        coreml_vae_decoder.license = f"Please refer to the Model Card available at huggingface.co/{args.model_version}/blob/main/LICENSE.md"
+        coreml_vae_decoder.short_description = \
+            "This is a model that can be used to generate and modify images based on text prompts." \
+            "It is a Latent Diffusion Model that uses two fixed, pretrained text encoders (OpenCLIP-ViT/G and CLIP-ViT/L)." \
+            "Please refer to https://arxiv.org/abs/2307.01952 for details"
+    else:
+        coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_vae_decoder.short_description = \
+            "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
+            "Please refer to https://arxiv.org/abs/2112.10752 for details."
+
     coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_decoder.version = args.model_version
-    coreml_vae_decoder.short_description = \
-        "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
-        "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
     coreml_vae_decoder.input_description["z"] = \
@@ -506,7 +713,7 @@ def convert_vae_decoder(pipe, args):
         report_correctness(baseline_out, coreml_out,
                            "vae_decoder baseline PyTorch to baseline CoreML")
 
-    del traced_vae_decoder, pipe.vae.decoder, coreml_vae_decoder
+    del traced_vae_decoder, pipe.vae.decoder, coreml_vae_decoder, reference_vae
     gc.collect()
 
 
@@ -536,8 +743,10 @@ def convert_vae_encoder(pipe, args):
     )
 
     sample_vae_encoder_inputs = {
-        "z": torch.rand(*z_shape, dtype=torch.float16)
+        "z": torch.rand(*z_shape).to("cpu")
     }
+
+    reference_vae = pipe.vae.to("cpu")
 
     class VAEEncoder(nn.Module):
         """ Wrapper nn.Module wrapper for pipe.encode() method
@@ -545,8 +754,8 @@ def convert_vae_encoder(pipe, args):
 
         def __init__(self):
             super().__init__()
-            self.quant_conv = pipe.vae.quant_conv
-            self.encoder = pipe.vae.encoder
+            self.quant_conv = reference_vae.quant_conv
+            self.encoder = reference_vae.encoder
             # Disable torch 2.0 scaled dot-product attention: https://github.com/apple/coremltools/issues/1823
             self.encoder.mid_block.attentions[0]._use_2_0_attn = False
 
@@ -560,17 +769,26 @@ def convert_vae_encoder(pipe, args):
         baseline_encoder, (sample_vae_encoder_inputs["z"].to(torch.float32), ))
 
     modify_coremltools_torch_frontend_badbmm()
+    modify_coremltools_torch_frontend_scaled_dot_product_attention()
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
         ["latent"], args)
 
     # Set model metadata
+    if args.is_sdxl:
+        coreml_vae_encoder.license = f"Please refer to the Model Card available at huggingface.co/{args.model_version}/blob/main/LICENSE.md"
+        coreml_vae_encoder.short_description = \
+            "This is a model that can be used to generate and modify images based on text prompts." \
+            "It is a Latent Diffusion Model that uses two fixed, pretrained text encoders (OpenCLIP-ViT/G and CLIP-ViT/L)." \
+            "Please refer to https://arxiv.org/abs/2307.01952 for details"
+    else:
+        coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_vae_encoder.short_description = \
+            "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
+            "Please refer to https://arxiv.org/abs/2112.10752 for details."
+
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_encoder.version = args.model_version
-    coreml_vae_encoder.short_description = \
-        "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
-        "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
     coreml_vae_encoder.input_description["z"] = \
@@ -594,7 +812,7 @@ def convert_vae_encoder(pipe, args):
         report_correctness(baseline_out, coreml_out,
                            "vae_encoder baseline PyTorch to baseline CoreML")
 
-    del traced_vae_encoder, pipe.vae.encoder, coreml_vae_encoder
+    del traced_vae_encoder, pipe.vae.encoder, coreml_vae_encoder, reference_vae
     gc.collect()
 
 
@@ -638,7 +856,7 @@ def convert_unet(pipe, args):
 
         encoder_hidden_states_shape = (
             batch_size,
-            args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size,
+            args.text_encoder_hidden_size or pipe.unet.config.cross_attention_dim,
             1,
             args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
         )
@@ -655,16 +873,48 @@ def convert_unet(pipe, args):
             ("encoder_hidden_states", torch.rand(*encoder_hidden_states_shape))
         ])
 
+        # Setup appropriate unet SD model
+        if args.is_sdxl:
+            text_embeds_shape = (batch_size, pipe.text_encoder_2.config.projection_dim)
+            time_ids_shape = (batch_size, 6)
+            sample_unet_inputs["text_embeds"] = torch.rand(*text_embeds_shape)
+            sample_unet_inputs["time_ids"] = torch.rand(*time_ids_shape)
+
+            # Initialize reference unet
+            class Unet(nn.Module):
+                def __init__(self, unet):
+                    super().__init__()
+                    self.unet = unet
+
+                def forward(self, sample, timestep, encoder_hidden_states, text_embeds, time_ids):
+                    added_cond_kwargs = {
+                        "text_embeds": text_embeds,
+                        "time_ids": time_ids
+                    }
+                    return self.unet(
+                        sample,
+                        timestep,
+                        encoder_hidden_states,
+                        added_cond_kwargs=added_cond_kwargs,
+                        return_dict=False,
+                    )
+            reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
+            load_state_dict_summary = reference_unet.load_state_dict(
+                pipe.unet.state_dict())
+            reference_unet = Unet(reference_unet)
+
+        else:
+            reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
+            load_state_dict_summary = reference_unet.load_state_dict(
+                pipe.unet.state_dict())
+        
+
+        
         # Prepare inputs
         baseline_sample_unet_inputs = deepcopy(sample_unet_inputs)
         baseline_sample_unet_inputs[
             "encoder_hidden_states"] = baseline_sample_unet_inputs[
                 "encoder_hidden_states"].squeeze(2).transpose(1, 2)
-
-        # Initialize reference unet
-        reference_unet = unet.UNet2DConditionModel(**pipe.unet.config).eval()
-        load_state_dict_summary = reference_unet.load_state_dict(
-            pipe.unet.state_dict())
 
         if args.unet_support_controlnet:
             from .unet import calculate_conv2d_output_shape
@@ -738,12 +988,20 @@ def convert_unet(pipe, args):
         gc.collect()
 
         # Set model metadata
+        if args.is_sdxl:
+            coreml_unet.license = f"Please refer to the Model Card available at huggingface.co/{args.model_version}/blob/main/LICENSE.md"
+            coreml_unet.short_description = \
+                "This is a model that can be used to generate and modify images based on text prompts." \
+                "It is a Latent Diffusion Model that uses two fixed, pretrained text encoders (OpenCLIP-ViT/G and CLIP-ViT/L)." \
+                "Please refer to https://arxiv.org/abs/2307.01952 for details"
+        else:
+            coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+            coreml_unet.short_description = \
+                "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
+                "Please refer to https://arxiv.org/abs/2112.10752 for details."
+
         coreml_unet.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-        coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
         coreml_unet.version = args.model_version
-        coreml_unet.short_description = \
-            "Stable Diffusion generates images conditioned on text or other images as input through the diffusion process. " \
-            "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
         # Set the input descriptions
         coreml_unet.input_description["sample"] = \
@@ -754,6 +1012,13 @@ def convert_unet(pipe, args):
             "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
             "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
             "Shorter text does not reduce computation."
+
+        if args.is_sdxl:
+            coreml_unet.input_description["text_embeds"] = \
+                "Additional embeddings passed to the unet based on the pooled output of the text encoders."
+            coreml_unet.input_description["time_ids"] = \
+                "Additional embeddings passed to the unet based on width and height dimensions." \
+                "For SDXL, default values look like [1024, 1024, 0, 0, 1024, 1024]"
 
         # Set the output descriptions
         coreml_unet.output_description["noise_pred"] = \
@@ -1157,19 +1422,37 @@ def convert_controlnet(pipe, args):
 def main(args):
     os.makedirs(args.o, exist_ok=True)
 
+    # Set the torch device
+    if torch.backends.mps.is_built():
+        args.device = "mps"
+    else:
+        args.device = "cpu"
+
     # Instantiate diffusers pipe as reference
-    logger.info(
-        f"Initializing StableDiffusionPipeline with {args.model_version}..")
-    pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
-                                                   use_auth_token=True)
+    if args.pipeline_type == "SDXL":
+        args.is_sdxl = True
+        logger.info(
+            f"Initializing StableDiffusionXLPipeline with {args.model_version}..")
+        pipe = StableDiffusionXLPipeline.from_pretrained(args.model_version,
+                                                         use_auth_token=True)
+        pipe.to(args.device)
+        # TODO: SPLIT_EINSUM needs updating to support SDXL architecture
+        # current implementation results in a longer load and inference times
+    else:
+        logger.info(
+            f"Initializing StableDiffusionPipeline with {args.model_version}..")
+        pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
+                                                       use_auth_token=True)
+
+        # Register the selected attention implementation globally
+        unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
+            args.attention_implementation]
+        logger.info(
+            f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
+        )
+
     logger.info("Done.")
 
-    # Register the selected attention implementation globally
-    unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
-        args.attention_implementation]
-    logger.info(
-        f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
-    )
 
     # Convert models
     if args.convert_vae_decoder:
@@ -1192,12 +1475,23 @@ def main(args):
         convert_unet(pipe, args)
         logger.info("Converted unet")
 
-    if args.convert_text_encoder:
-        logger.info("Converting text_encoder")
-        convert_text_encoder(pipe, args)
-        logger.info("Converted text_encoder")
+    if args.is_sdxl:
+        if args.convert_text_encoder:
+            logger.info("Converting text_encoder")
+            convert_text_encoder_xl(pipe, args, "text_encoder")
+            logger.info("Converted text_encoder")
 
-    if args.convert_safety_checker:
+        if args.convert_text_encoder_2:
+            logger.info("Converting text_encoder_2")
+            convert_text_encoder_xl(pipe, args, "text_encoder_2")
+            logger.info("Converted text_encoder_2")
+    else:
+        if args.convert_text_encoder:
+            logger.info("Converting text_encoder")
+            convert_text_encoder(pipe, args)
+            logger.info("Converted text_encoder")
+
+    if args.convert_safety_checker and not args.is_sdxl:
         logger.info("Converting safety_checker")
         convert_safety_checker(pipe, args)
         logger.info("Converted safety_checker")
@@ -1218,6 +1512,7 @@ def parser_spec():
 
     # Select which models to export (All are needed for text-to-image pipeline to function)
     parser.add_argument("--convert-text-encoder", action="store_true")
+    parser.add_argument("--convert-text-encoder-2", action="store_true")
     parser.add_argument("--convert-vae-decoder", action="store_true")
     parser.add_argument("--convert-vae-encoder", action="store_true")
     parser.add_argument("--convert-unet", action="store_true")
@@ -1310,6 +1605,12 @@ def parser_spec():
         "If specified, enable unet to receive additional inputs from controlnet. "
         "Each input added to corresponding resnet output."
         )
+    parser.add_argument(
+        "--pipeline-type",
+        default="SD",
+        choices=("SDXL", "SD"),
+        type=str,
+        help="If specified, use StableDiffusionXLPipeline instead of StableDiffusionPipeline")
 
     # Swift CLI Resource Bundling
     parser.add_argument(

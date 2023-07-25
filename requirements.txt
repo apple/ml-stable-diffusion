@@ -1,7 +1,8 @@
 coremltools>=7.0b1
-diffusers[torch]
+diffusers[torch]>=0.18.2
 torch
 transformers==4.29.2
 scipy
-scikit-learn
+scikit-learn<=1.1.2
 pytest
+invisible-watermark>=0.2.0
