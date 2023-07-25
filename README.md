@@ -2,7 +2,8 @@
 
 Run Stable Diffusion on Apple Silicon with Core ML
 
-<img src="assets/readme_reel.png">
+[\[Blog Post\]](https://machinelearning.apple.com/research/stable-diffusion-coreml-apple-silicon) [\[BibTeX\]](#bibtex)
+
 
 This repository comprises:
 
@@ -11,27 +12,142 @@ This repository comprises:
 
 If you run into issues during installation or runtime, please refer to the [FAQ](#faq) section. Please refer to the [System Requirements](#system-requirements) section before getting started.
 
-
-## <a name="example-results"></a> Example Results
-
-There are numerous versions of Stable Diffusion available on the [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion). Here are example results from three of those models:
-
-`--model-version` | [stabilityai/stable-diffusion-2-base](https://huggingface.co/stabilityai/stable-diffusion-2-base) |  [CompVis/stable-diffusion-v1-4](https://huggingface.co/CompVis/stable-diffusion-v1-4) |  [runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) |
-:------:|:------:|:------:|:------:
-Output | ![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_11_computeUnit_CPU_AND_GPU_modelVersion_stabilityai_stable-diffusion-2-base.png) | ![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_13_computeUnit_CPU_AND_NE_modelVersion_CompVis_stable-diffusion-v1-4.png) | ![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_93_computeUnit_CPU_AND_NE_modelVersion_runwayml_stable-diffusion-v1-5.png)
-M1 iPad Pro 8GB Latency (s)     | 29 | 38 | 38 |
-M1 MacBook Pro 16GB Latency (s) | 24 | 35 | 35 |
-M2 MacBook Air 8GB Latency (s)  | 18 | 23 | 23 |
-
-Please see [Important Notes on Performance Benchmarks](#important-notes-on-performance-benchmarks) section for details.
+<img src="assets/readme_reel.png">
 
 ## <a name="system-requirements"></a> System Requirements
 
-The following is recommended to use all the functionality in this repository:
+Model Conversion:
 
- Python | macOS | Xcode | iPadOS, iOS |
-:------:|:-----:|:-----:|:-----------:|
- 3.8    | 13.1  | 14.3  | 16.2        |
+ macOS  | Python | coremltools |
+:------:|:------:|:-----------:|
+  13.1  | 3.8    |    7.0      |
+
+Project Build:
+
+  macOS | Xcode | Swift |
+:------:|:-----:|:-----:|
+  14.0  | 15.0  |  5.8  |
+
+Target Device Runtime:
+
+  macOS | iPadOS, iOS |
+:------:|:-----------:|
+  13.1  |     16.2    |
+
+Target Device Runtime ([With Memory Improvements](#compression)):
+
+  macOS | iPadOS, iOS |
+:------:|:-----------:|
+  14.0  |     17.0    |
+
+Target Device Hardware Generation:
+
+  Mac   |  iPad   | iPhone  |
+:------:|:-------:|:-------:|
+   M1   |   M1    |  A14    |
+
+
+## <a name="performance-benchmark"></a> Performance Benchmarks
+
+
+[`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base) Benchmark:
+
+
+|        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
+| --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
+| iPhone 12 Mini        | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      20                |        1.3               |
+| iPhone 12 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      17                |        1.4               |
+| iPhone 13             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      15                |        1.7               |
+| iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      12                |        1.8               |
+| iPhone 14             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      13                |        1.8               |
+| iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      9                 |        2.3               |
+| iPad Pro (M1)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      11                |        2.1               |
+| iPad Pro (M2)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      8                 |        2.9               |
+| Mac Studio (M1 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      4                 |        6.3               |
+| Mac Studio (M2 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      3                 |        7.6               |
+
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+- This benchmark was conducted by Apple using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 in June 2023.
+- The performance data was collected by running the `StableDiffusion` Swift pipeline.
+- Swift code is not fully optimized, introducing up to ~10% overhead unrelated to Core ML model execution.
+- The median latency value across 3 back-to-back end-to-end executions are reported
+- The image generation procedure follows the standard configuration: 20 inference steps, 512x512 output image resolution, 77 text token sequence length, classifier-free guidance (batch size of 2 for unet).
+- The actual prompt length does not impact performance because the Core ML model is converted with a static shape that computes the forward pass for all of the 77 elements (`tokenizer.model_max_length`) in the text token sequence regardless of the actual length of the input text.
+- Weights are compressed to 6 bit precision. Please refer to [this section](#compression) for details.
+- Activations are in float16 precision for both the GPU and the Neural Engine.
+- For iPhone 12 mini and iPhone 13, we enable the [reduceMemory](https://github.com/apple/ml-stable-diffusion/blob/main/swift/StableDiffusion/pipeline/StableDiffusionPipeline.swift#L65) option to load and unload models just-in-time to avoid memory issues. This added up to 2 seconds to the end-to-end latency.
+- In the benchmark table, we report the best performing `--compute-unit` and `--attention-implementation` values per device. The former does not modify the Core ML model and can be applied during runtime. The latter modifies the Core ML model. Note that the best performing compute unit is model version and hardware-specific.
+- Note that the performance optimizations in this repository (e.g. `--attention-implementation`) are generally applicable to Transformers and not customized to Stable Diffusion. Better performance may be observed upon custom kernel tuning. Therefore, these numbers do not represent **peak** HW capability.
+- Performance may vary across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
+- Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state. Given these factors, we do not report sub-second variance in latency.
+
+</details>
+
+## <a name="compression"></a> Weight Compression
+
+coremltools-7.0 supports advanced weight compression techniques for [pruning](https://coremltools.readme.io/v7.0/docs/pruning), [palettization](https://coremltools.readme.io/v7.0/docs/palettization-overview) and [linear 8-bit quantization](https://coremltools.readme.io/v7.0/docs/quantization-aware-training). For these techniques, `coremltools.optimize.torch.*` includes APIs that require fine-tuning to maintain accuracy at higher compression rates whereas `coremltools.optimize.coreml.*` includes APIs that are applied post-training and are data-free.
+
+We demonstrate how data-free [post-training palettization](https://coremltools.readme.io/v7.0/docs/post-training-palettization) implemented in `coremltools.optimize.coreml.palettize_weights` enables us to achieve greatly improved performance for Stable Diffusion on mobile devices. This API implements the [Fast Exact k-Means](https://arxiv.org/abs/1701.07204) algorithm for optimal weight clustering which yields more accurate palettes. Using `--quantize-nbits {2,4,6,8}` during [conversion](#converting-models-to-coreml) is going to apply this compression to the unet and text_encoder models.
+
+For best results, we recommend [training-time palettization](https://coremltools.readme.io/v7.0/docs/training-time-palettization): `coremltools.optimize.torch.palettization.DKMPalettizer` if fine-tuning your model is feasible. This API implements the [Differentiable k-Means (DKM)](https://machinelearning.apple.com/research/differentiable-k-means) learned palettization algorithm. In this exercise, we stick to post-training palettization for the sake of simplicity and ease of reproducibility.
+
+The Neural Engine is capable of accelerating models with low-bit palettization: 2, 4, 6 or 8 bits. With iOS 17 and macOS 14, compressed weights for Core ML models can be just-in-time decompressed during runtime (as opposed to ahead-of-time decompression upon load) to match the precision of activation tensors. This yields significant memory savings and enables models to run on devices with smaller RAM (e.g. iPhone 12 Mini). In addition, compressed weights are faster to fetch from memory which reduces the latency of memory bandwidth-bound layers. The just-in-time decompression behavior depends on the compute unit, layer type and hardware generation.
+
+| Weight Precision | `--compute-unit`   | [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base) generating *"a high quality photo of a surfing dog"* |
+| :---------------:| :----------------: | ------------------------------------------------------  |
+| 6-bit            | cpuAndNeuralEngine | <img src="assets/palette6_cpuandne_readmereel.png"> |
+| 16-bit           | cpuAndNeuralEngine | <img src="assets/float16_cpuandne_readmereel.png">  |
+| 16-bit           | cpuAndGPU          | <img src="assets/float16_gpu_readmereel.png"> |
+
+Note that there are minor differences across 16-bit (float16) and 6-bit results. These differences are comparable to the differences across float16 and float32 or differences across compute units as exemplified above. We recommend a minimum of 6 bits for palettizing Stable Diffusion. Smaller number of bits (2 and 4) will require fine-tuning to recover image generation quality as previously mentioned.
+
+Resources:
+- [Core ML Tools Docs: Optimizing Models](https://coremltools.readme.io/v7.0/docs/optimizing-models)
+- [WWDC23 Session Video: Use Core ML Tools for machine learning model compression](https://developer.apple.com/videos/play/wwdc2023/10047)
+
+## <a name="using-controlnet"></a> Using ControlNet
+
+Example results using the prompt *"a high quality photo of a surfing dog"* conditioned on the scribble (leftmost):
+
+<img src="assets/controlnet_readme_reel.png">
+
+[ControlNet](https://huggingface.co/lllyasviel/ControlNet) allows users to condition image generation with Stable Diffusion on signals such as edge maps, depth maps, segmentation maps, scribbles and pose. Thanks to [@ryu38's contribution](https://github.com/apple/ml-stable-diffusion/pull/153), both the Python CLI and the Swift package support ControlNet models. Please refer to [this section](#converting-models-to-coreml) for details on setting up Stable Diffusion with ControlNet.
+
+
+## <a name="system-multilingual-text-encoder"></a> Using the System Multilingual Text Encoder
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+With iOS 17 and macOS 14, `NaturalLanguage` framework introduced the [NLContextualEmbedding](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding) which provides Transformer-based textual embeddings for Latin (20 languages), Cyrillic (4 langauges) and CJK (3 languages) scripts. The WWDC23 session titled [Explore Natural Language multilingual models](https://developer.apple.com/videos/play/wwdc2023/10042) demonstrated how this powerful new model can be used by developers to train downstream tasks such as multilingual image generation with Stable Diffusion.
+
+The code to reproduce this demo workflow is made available in this repository. There are several ways in which this workflow can be implemented. Here is an example:
+
+**Step 1:** Curate an image-text dataset with the desired languages.
+
+**Step 2:** Pre-compute the NLContextualEmbedding values and replace the text strings with these embedding vectors in your dataset.
+
+**Step 3:** Fine-tune a base model from Hugging Face Hub that is compatible with the [StableDiffusionPipeline](https://huggingface.co/docs/diffusers/api/pipelines/stable_diffusion/overview) by using your new dataset and replacing the default text_encoder with your pre-computed NLContextualEmbedding values.
+
+**Step 4:** In order to be able to swap the text_encoder of a base model without training new layers, the base model's `text_encoder.hidden_size` must match that of NLContextualEmbedding. If it doesn't, you will need to train a linear projection layer to map between the two dimensionalities. After fine-tuning, this linear layer should be converted to CoreML as follows:
+
+```shell
+python -m python_coreml_stable_diffusion.multilingual_projection --input-path <path-to-projection-torchscript> --output-dir <output-dir>
+```
+
+The command above will yield a `MultilingualTextEncoderProjection.mlmodelc` file under `--output-dir` and this should be colocated with the rest of the Core ML model assets that were generated through `--bundle-resources-for-swift-cli`.
+
+**Step 5:** The multilingual system text encoder can now be invoked by setting `useMultilingualTextEncoder` to true when initializing a pipeline or setting `--use-multilingual-text-encoder` in the CLI. Note that the model assets are distributed over-the-air so the first invocation will trigger asset downloads which is less than 100MB.
+
+
+Resources:
+- [WWDC23 Session Video: Explore Natural Language multilingual models](https://developer.apple.com/videos/play/wwdc2023/10042)
+- [NLContextualEmbedding API Documentation](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding)
+
+</details>
 
 ## <a name="using-converted-weights"></a> Using Ready-made Core ML Models from Hugging Face Hub
 
@@ -40,9 +156,17 @@ The following is recommended to use all the functionality in this repository:
 
 🤗 Hugging Face ran the [conversion procedure](#converting-models-to-coreml) on the following models and made the Core ML weights publicly available on the Hub. If you would like to convert a version of Stable Diffusion that is not already available on the Hub, please refer to the [Converting Models to Core ML](#converting-models-to-core-ml).
 
-* [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
-* [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5)
-* [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
+* 6-bit quantized models (suitable for iOS 17 and macOS 14):
+  - [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-1-4-palettized)
+  - [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5-palettized)
+  - [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base-palettized)
+  - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base-palettized)
+
+* Uncompressed models:
+  - [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
+  - [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5)
+  - [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
+  - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base)
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 
@@ -70,29 +194,13 @@ If you prefer to download specific variants instead of cloning the repos, you ca
 
 ```Python
 from huggingface_hub import snapshot_download
-from huggingface_hub.file_download import repo_folder_name
 from pathlib import Path
-import shutil
 
 repo_id = "apple/coreml-stable-diffusion-v1-4"
 variant = "original/packages"
 
-def download_model(repo_id, variant, output_dir):
-    destination = Path(output_dir) / (repo_id.split("/")[-1] + "_" + variant.replace("/", "_"))
-    if destination.exists():
-        raise Exception(f"Model already exists at {destination}")
-    
-    # Download and copy without symlinks
-    downloaded = snapshot_download(repo_id, allow_patterns=f"{variant}/*", cache_dir=output_dir)
-    downloaded_bundle = Path(downloaded) / variant
-    shutil.copytree(downloaded_bundle, destination)
-
-    # Remove all downloaded files
-    cache_folder = Path(output_dir) / repo_folder_name(repo_id=repo_id, repo_type="model")
-    shutil.rmtree(cache_folder)
-    return destination
-
-model_path = download_model(repo_id, variant, output_dir="./models")
+model_path = Path("./models") / (repo_id.split("/")[-1] + "_" + variant.replace("/", "_"))
+snapshot_download(repo_id, allow_patterns=f"{variant}/*", local_dir=model_path, local_dir_use_symlinks=False)
 print(f"Model downloaded at {model_path}")
 ```
 
@@ -133,9 +241,11 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline.
 
-- `--chunk-unet`: Splits the Unet model in two approximately equal chunks (each with less than 1GB of weights) for mobile-friendly deployment. This is **required** for Neural Engine deployment on iOS and iPadOS. This is not required for macOS. Swift CLI is able to consume both the chunked and regular versions of the Unet model but prioritizes the former. Note that chunked unet is not compatible with the Python pipeline because Python pipeline is intended for macOS only. Chunking is for on-device deployment with Swift only.
+- `--quantize-nbits`: Quantizes the weights of unet and text_encoder models down to 2, 4, 6 or 8 bits using a globally optimal k-means clustering algorithm. By default all models are weight-quantized to 16 bits even if this argument is not specified. Please refer to [this section](#compression for details and further guidance on weight compression.
 
-- `--attention-implementation`: Defaults to `SPLIT_EINSUM` which is the implementation described in [Deploying Transformers on the Apple Neural Engine](https://machinelearning.apple.com/research/neural-engine-transformers). `--attention-implementation ORIGINAL` will switch to an alternative that should be used for CPU or GPU deployment. Please refer to the [Performance Benchmark](#performance-benchmark) section for further guidance.
+- `--chunk-unet`: Splits the Unet model in two approximately equal chunks (each with less than 1GB of weights) for mobile-friendly deployment. This is **required** for Neural Engine deployment on iOS and iPadOS if weights are not quantized to 6-bits or less (`--quantize-nbits {2,4,6}`). This is not required for macOS. Swift CLI is able to consume both the chunked and regular versions of the Unet model but prioritizes the former. Note that chunked unet is not compatible with the Python pipeline because Python pipeline is intended for macOS only.
+
+- `--attention-implementation`: Defaults to `SPLIT_EINSUM` which is the implementation described in [Deploying Transformers on the Apple Neural Engine](https://machinelearning.apple.com/research/neural-engine-transformers). `--attention-implementation SPLIT_EINSUM_V2` yields 10-30% improvement for mobile devices, still targeting the Neural Engine. `--attention-implementation ORIGINAL` will switch to an alternative implementation that should be used for CPU or GPU deployment on some Mac devices. Please refer to the [Performance Benchmark](#performance-benchmark) section for further guidance.
 
 - `--check-output-correctness`: Compares original PyTorch model's outputs to final Core ML model's outputs. This flag increases RAM consumption significantly so it is recommended only for debugging purposes.
 
@@ -170,26 +280,6 @@ Please refer to the help menu for all available arguments: `python -m python_cor
 
 <details>
   <summary> Click to expand </summary>
-
-### <a name="swift-requirements"></a> System Requirements
-
-**Building** (minimum):
-
-- Xcode 14.3
-- Command Line Tools for Xcode 14.3
-
-Check [developer.apple.com](https://developer.apple.com/download/all/?q=xcode) for the latest versions.
-
-**Running** (minimum):
-
-| Mac        | iPad\*      | iPhone\*      |
-|:----------:|:-----------:|:-------------:|
-| macOS 13.1 | iPadOS 16.2 | iOS 16.2      |
-| M1         | M1          | iPhone 12 Pro |
-
-You will also need the resources generated by the `--bundle-resources-for-swift-cli` option described in [Converting Models to Core ML](#converting-models-to-coreml)
-
-\* Please see [FAQ](#faq) [Q6](#q-mobile-app) regarding deploying on iPad and iPhone.
 
 ### Example CLI Usage
 ```shell
@@ -254,78 +344,6 @@ Note that the chunked version of Unet is checked for first. Only if it is not pr
 🤗 Hugging Face created an [open-source demo app](https://github.com/huggingface/swift-coreml-diffusers) on top of this library. It's written in native Swift and Swift UI, and runs on macOS, iOS and iPadOS. You can use the code as a starting point for your app, or to see how to integrate this library in your own projects.
 
 Hugging Face has made the app [available in the Mac App Store](https://apps.apple.com/app/diffusers/id1666309574?mt=12).
-
-</details>
-
-## <a name="performance-benchmark"></a> Performance Benchmark
-
-<details>
-  <summary> Click to expand </summary>
-
-Standard [CompVis/stable-diffusion-v1-4](https://huggingface.co/CompVis/stable-diffusion-v1-4) Benchmark
-
-|        Device                      | `--compute-unit`| `--attention-implementation` | Latency (seconds) |
-| ---------------------------------- | --------------  | ---------------------------- | ----------------- |
-| Mac Studio (M1 Ultra, 64-core GPU) | `CPU_AND_GPU`   |     `ORIGINAL`               |      9            |
-| Mac Studio (M1 Ultra, 48-core GPU) | `CPU_AND_GPU`   |     `ORIGINAL`               |      13           |
-| MacBook Pro (M1 Max, 32-core GPU)  | `CPU_AND_GPU`   |     `ORIGINAL`               |      18           |
-| MacBook Pro (M1 Max, 24-core GPU)  | `CPU_AND_GPU`   |     `ORIGINAL`               |      20           |
-| MacBook Pro (M1 Pro, 16-core GPU)  |    `ALL`        |     `SPLIT_EINSUM (default)` |      26           |
-| MacBook Pro (M2)                   | `CPU_AND_NE`    |     `SPLIT_EINSUM (default)` |      23           |
-| MacBook Pro (M1)                   | `CPU_AND_NE`    |     `SPLIT_EINSUM (default)` |      35           |
-| iPad Pro (5th gen, M1)             | `CPU_AND_NE`    |     `SPLIT_EINSUM (default)` |      38           |
-
-
-Please see [Important Notes on Performance Benchmarks](#important-notes-on-performance-benchmarks) section for details.
-
-</details>
-
-## <a name="important-notes-on-performance-benchmarks"></a> Important Notes on Performance Benchmarks
-
-<details>
-  <summary> Click to expand </summary>
-
-- This benchmark was conducted by Apple using public beta versions of iOS 16.2, iPadOS 16.2 and macOS 13.1 in November 2022.
-- The executed program is `python_coreml_stable_diffusion.pipeline` for macOS devices and a minimal Swift test app built on the `StableDiffusion` Swift package for iOS and iPadOS devices.
-- The median value across 3 end-to-end executions is reported.
-- Performance may materially differ across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
-- The image generation procedure follows the standard configuration: 50 inference steps, 512x512 output image resolution, 77 text token sequence length, classifier-free guidance (batch size of 2 for unet).
-- The actual prompt length does not impact performance because the Core ML model is converted with a static shape that computes the forward pass for all of the 77 elements (`tokenizer.model_max_length`) in the text token sequence regardless of the actual length of the input text.
-- Pipelining across the 4 models is not optimized and these performance numbers are subject to variance under increased system load from other applications. Given these factors, we do not report sub-second variance in latency.
-- Weights and activations are in float16 precision for both the GPU and the Neural Engine.
-- The Swift CLI program consumes a peak memory of approximately 2.6GB (without the safety checker), 2.1GB of which is model weights in float16 precision. We applied [8-bit weight quantization](https://coremltools.readme.io/docs/compressing-ml-program-weights#use-affine-quantization) to reduce peak memory consumption by approximately 1GB. However, we observed that it had an adverse effect on generated image quality and we rolled it back. We encourage developers to experiment with other advanced weight compression techniques such as [palettization](https://coremltools.readme.io/docs/compressing-ml-program-weights#use-a-lookup-table) and/or [pruning](https://coremltools.readme.io/docs/compressing-ml-program-weights#use-sparse-representation) which may yield better results.
-- In the [benchmark table](performance-benchmark), we report the best performing `--compute-unit` and `--attention-implementation` values per device. The former does not modify the Core ML model and can be applied during runtime. The latter modifies the Core ML model. Note that the best performing compute unit is model version and hardware-specific.
-
-</details>
-
-
-## <a name="results-with-different-compute-units"></a> Results with Different Compute Units
-
-<details>
-  <summary> Click to expand </summary>
-
-It is highly probable that there will be slight differences across generated images using different compute units.
-
-The following images were generated on an M1 MacBook Pro and macOS 13.1 with the prompt *"a photo of an astronaut riding a horse on mars"* using the [runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) model version. The random seed was set to 93:
-
-  CPU_AND_NE  |  CPU_AND_GPU  |  ALL  |
-:------------:|:-------------:|:------:
-![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_93_computeUnit_CPU_AND_NE_modelVersion_runwayml_stable-diffusion-v1-5.png)  |  ![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_93_computeUnit_CPU_AND_GPU_modelVersion_runwayml_stable-diffusion-v1-5.png) | ![](assets/a_high_quality_photo_of_an_astronaut_riding_a_horse_in_space/randomSeed_93_computeUnit_ALL_modelVersion_runwayml_stable-diffusion-v1-5.png) |
-
-Differences may be less or more pronounced for different inputs. Please see the [FAQ](#faq) Q8 for a detailed explanation.
-
-</details>
-
-## <a name="results-with-controlnet"></a> Results with ControlNet
-
-<details>
-  <summary> Click to expand </summary>
-
-[ControlNet](https://huggingface.co/lllyasviel/ControlNet) allows users to condition image generation with Stable Diffusion on signals such as edge maps, depth maps, segmentation maps, scribbles and pose. Thanks to [@ryu38's contribution](https://github.com/apple/ml-stable-diffusion/pull/153), both the Python CLI and the Swift package support ControlNet models. Please refer to CLI arguments in previous sections to exercise this new feature.
-
-Example results using the prompt "a high quality photo of a surfing dog" conditioned on the scribble (leftmost):
-
-<img src="assets/controlnet_readme_reel.png">
 
 </details>
 
@@ -396,6 +414,9 @@ The image generation process in `StableDiffusion` can yield over 2 GB of peak me
 If your app crashes during image generation, consider adding the [Increased Memory Limit](https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_developer_kernel_increased-memory-limit) capability to inform the system that some of your app’s core features may perform better by exceeding the default app memory limit on supported devices.
  
 On iOS, depending on the iPhone model, Stable Diffusion model versions, selected compute units, system load and design of your app, this may still not be sufficient to keep your apps peak memory under the limit. Please remember, because the device shares memory between apps and iOS processes, one app using too much memory can compromise the user experience across the whole device.
+
+We **strongly recommend** quantizing your models with `--quantize-nbits 6` for iOS deployment. This reduces the peak RAM usage by 1GB or more depending on the model version and robustly enables inference even on iPhone 12 Mini.
+
 </details>
 
 <details>
@@ -420,7 +441,7 @@ On iOS, depending on the iPhone model, Stable Diffusion model versions, selected
 
   <b> 3. Model Function Drift During Conversion </b>
 
-  The difference in outputs across corresponding PyTorch and Core ML models is a potential cause. The signal integrity is tested during the conversion process (enabled via `--check-output-correctness` argument to  `python_coreml_stable_diffusion.torch2coreml`) and it is verified to be above a minimum [PSNR](https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio) value as tested on random inputs. Note that this is simply a sanity check and does not guarantee this minimum PSNR across all possible inputs. Furthermore, the results are not guaranteed to be identical when executing the same Core ML models across different compute units. This is not expected to be a major source of difference as the sample visual results indicate in [this section](#results-with-different-compute-units).
+  The difference in outputs across corresponding PyTorch and Core ML models is a potential cause. The signal integrity is tested during the conversion process (enabled via `--check-output-correctness` argument to  `python_coreml_stable_diffusion.torch2coreml`) and it is verified to be above a minimum [PSNR](https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio) value as tested on random inputs. Note that this is simply a sanity check and does not guarantee this minimum PSNR across all possible inputs. Furthermore, the results are not guaranteed to be identical when executing the same Core ML models across different compute units. This is not expected to be a major source of difference as the sample visual results indicate in [this section](#compression).
 
   <b> 4. Weights and Activations Data Type </b>
 
@@ -458,3 +479,14 @@ On iOS, depending on the iPhone model, Stable Diffusion model versions, selected
 </details>
 
 </details>
+
+## <a name="bibtex"></a> BibTeX Reference
+
+```latex
+@misc{stable-diffusion-coreml-apple-silicon,
+title = {Stable Diffusion with Core ML on Apple Silicon},
+author = {Atila Orhon and Michael Siracusa and Aseem Wadhwa},
+year = {2022},
+URL = {null}
+}
+```

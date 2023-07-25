@@ -37,7 +37,7 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     public let useLowerOrderFinal = true
     
     // Stores solverOrder (2) items
-    private(set) var modelOutputs: [MLShapedArray<Float32>] = []
+    public private(set) var modelOutputs: [MLShapedArray<Float32>] = []
 
     /// Create a scheduler that uses a second order DPM-Solver++ algorithm.
     ///

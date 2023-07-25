@@ -9,6 +9,7 @@ import StableDiffusion
 import UniformTypeIdentifiers
 import Cocoa
 import CoreImage
+import NaturalLanguage
 
 @available(iOS 16.2, macOS 13.1, *)
 struct StableDiffusionSample: ParsableCommand {
@@ -91,6 +92,12 @@ struct StableDiffusionSample: ParsableCommand {
     @Flag(help: "Reduce memory usage")
     var reduceMemory: Bool = false
 
+    @Flag(help: "Use system multilingual NLContextualEmbedding as encoder model")
+    var useMultilingualTextEncoder: Bool = false
+
+    @Option(help: "The natural language script for the multilingual contextual embedding")
+    var script: Script = .latin
+
     mutating func run() throws {
         guard FileManager.default.fileExists(atPath: resourcePath) else {
             throw RunError.resources("Resource path does not exist \(resourcePath)")
@@ -102,11 +109,27 @@ struct StableDiffusionSample: ParsableCommand {
 
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
-        let pipeline = try StableDiffusionPipeline(resourcesAt: resourceURL,
-                                                   controlNet: controlnet,
-                                                   configuration: config,
-                                                   disableSafety: disableSafety,
-                                                   reduceMemory: reduceMemory)
+        let pipeline: StableDiffusionPipeline
+        if #available(macOS 14.0, iOS 17.0, *) {
+            pipeline = try StableDiffusionPipeline(
+                resourcesAt: resourceURL,
+                controlNet: controlnet,
+                configuration: config,
+                disableSafety: disableSafety,
+                reduceMemory: reduceMemory,
+                useMultilingualTextEncoder: useMultilingualTextEncoder,
+                script: script
+            )
+        } else  {
+            pipeline = try StableDiffusionPipeline(
+                resourcesAt: resourceURL,
+                controlNet: controlnet,
+                configuration: config,
+                disableSafety: disableSafety,
+                reduceMemory: reduceMemory
+            )
+        }
+
         try pipeline.loadResources()
         
         let startingImage: CGImage?
@@ -153,7 +176,7 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.guidanceScale = guidanceScale
         pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
         pipelineConfig.rngType = rng.stableDiffusionRNG
-        
+
         let images = try pipeline.generateImages(
             configuration: pipelineConfig,
             progressHandler: { progress in
@@ -298,6 +321,9 @@ enum RNGOption: String, ExpressibleByArgument {
         }
     }
 }
+
+@available(iOS 16.2, macOS 13.1, *)
+extension Script: ExpressibleByArgument {}
 
 if #available(iOS 16.2, macOS 13.1, *) {
     StableDiffusionSample.main()

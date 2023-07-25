@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreML
+import Accelerate
 
 @available(iOS 16.2, macOS 13.1, *)
 public struct ControlNet: ResourceManaging {
@@ -99,13 +100,15 @@ public struct ControlNet: ResourceManaging {
             for n in 0..<results.count {
                 let result = results.features(at: n)
                 for k in result.featureNames {
-                    let newValue = result.featureValue(for: k)!.shapedArrayValue(of: Float32.self)!
+                    let newValue = result.featureValue(for: k)!.multiArrayValue!
                     if modelIndex == 0 {
-                        outputs[n][k] = newValue
+                        outputs[n][k] = MLShapedArray<Float32>(newValue)
                     } else {
-                        outputs[n][k]!.withUnsafeMutableShapedBufferPointer { pt, _, _ in
-                            for (i, v) in newValue.scalars.enumerated() { pt[i] += v }
-                        }
+                        let outputArray = MLMultiArray(outputs[n][k]!)
+                        let count = newValue.count
+                        let inputPointer = newValue.dataPointer.assumingMemoryBound(to: Float.self)
+                        let outputPointer = outputArray.dataPointer.assumingMemoryBound(to: Float.self)
+                        vDSP_vadd(inputPointer, 1, outputPointer, 1, outputPointer, 1, vDSP_Length(count))
                     }
                 }
             }
