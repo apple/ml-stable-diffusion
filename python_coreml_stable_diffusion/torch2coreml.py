@@ -557,7 +557,7 @@ def modify_coremltools_torch_frontend_badbmm():
 
 def modify_coremltools_torch_frontend_scaled_dot_product_attention():
     """
-    Modifies coremltools torch frontend for scaled_dot_product_attention having 7 inputs instead of 6:
+    Modifies coremltools torch frontend for scaled_dot_product_attention sometimes having 7 inputs instead of 6:
     """
     import math as _math
     from coremltools.converters.mil import register_torch_op
@@ -586,7 +586,7 @@ def modify_coremltools_torch_frontend_scaled_dot_product_attention():
         See details at:
         https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         """
-        q, k, v, attn_mask, dropout, is_causal, empty = _get_inputs(context, node, expected=7)
+        q, k, v, attn_mask, dropout, is_causal = _get_inputs(context, node, min_expected=6)[:6]
         if attn_mask is not None and is_causal.val:
             raise ValueError(
                 "scaled_dot_product_attention op: attn_mask cannot be provided when is_causal is set to True."
@@ -681,6 +681,7 @@ def convert_vae_decoder(pipe, args):
 
     modify_coremltools_torch_frontend_badbmm()
     modify_coremltools_torch_frontend_scaled_dot_product_attention()
+    
     coreml_vae_decoder, out_path = _convert_to_coreml(
         "vae_decoder", traced_vae_decoder, sample_vae_decoder_inputs,
         ["image"], args,
@@ -782,6 +783,7 @@ def convert_vae_encoder(pipe, args):
 
     modify_coremltools_torch_frontend_badbmm()
     modify_coremltools_torch_frontend_scaled_dot_product_attention()
+ 
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
         ["latent"], args)
