@@ -403,11 +403,10 @@ def convert_text_encoder_xl(pipe, args, text_encoder_name):
 
 
     # Create sample inputs for tracing, conversion and correctness verification
-    if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
-        reference_text_encoder = pipe.text_encoder
+    reference_text_encoder = getattr(pipe, text_encoder_name)
+    if hasattr(pipe, "tokenizer") and pipe.tokenizer is not None:
         text_encoder_sequence_length = pipe.tokenizer.model_max_length
-    elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
-        reference_text_encoder = pipe.text_encoder_2
+    elif hasattr(pipe, "tokenizer_2") and pipe.tokenizer_2 is not None:
         text_encoder_sequence_length = pipe.tokenizer_2.model_max_length
 
     reference_text_encoder.to(args.device)
