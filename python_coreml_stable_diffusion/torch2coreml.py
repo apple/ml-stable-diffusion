@@ -398,9 +398,15 @@ def convert_text_encoder_xl(pipe, args, text_encoder_name):
             f"`{text_encoder_name}` already exists at {out_path}, skipping conversion."
         )
         return
-    
-    reference_text_encoder = getattr(pipe, text_encoder_name)
 
+    if getattr(pipe, text_encoder_name) is None:
+        logger.warning(
+            f"diffusers pipeline for {args.model_version} does not have a `{text_encoder_name}` module! " \
+            f"`--convert-{text_encoder_name}` will be ignored."
+        )
+        return
+
+    reference_text_encoder = getattr(pipe, text_encoder_name)
 
     # Create sample inputs for tracing, conversion and correctness verification
     reference_text_encoder = getattr(pipe, text_encoder_name)
@@ -862,7 +868,7 @@ def convert_unet(pipe, args):
             args.latent_w or pipe.unet.config.sample_size,  # W
         )
 
-        if not hasattr(pipe, "text_encoder") and not hasattr(pipe, "text_encoder_2"):
+        if getattr(pipe, "text_encoder") is None and getattr(pipe, "text_encoder_2") is None:
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
