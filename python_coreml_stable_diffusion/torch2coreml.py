@@ -291,7 +291,7 @@ def convert_text_encoder(pipe, args):
         text_encoder_vocab_size = pipe.text_encoder.config.vocab_size
         text_encoder_sequence_length = pipe.tokenizer.model_max_length
     elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
-        text_token_sequence_length = pipe.text_encoder_2.config.vocab_size
+        text_encoder_vocab_size = pipe.text_encoder_2.config.vocab_size
         text_encoder_sequence_length = pipe.tokenizer_2.model_max_length
 
     sample_text_encoder_inputs = {
