@@ -11,7 +11,7 @@ import argparse
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 import coremltools as ct
-from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, ControlNetModel, UNet2DConditionModel
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, ControlNetModel
 import gc
 
 import logging
@@ -287,13 +287,17 @@ def convert_text_encoder(pipe, args):
         return
 
     # Create sample inputs for tracing, conversion and correctness verification
-    text_encoder_sequence_length = pipe.tokenizer.model_max_length
-    text_encoder_hidden_size = args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size
+    if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+        text_encoder_vocab_size = pipe.text_encoder.config.vocab_size
+        text_encoder_sequence_length = pipe.tokenizer.model_max_length
+    elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+        text_token_sequence_length = pipe.text_encoder_2.config.vocab_size
+        text_encoder_sequence_length = pipe.tokenizer_2.model_max_length
 
     sample_text_encoder_inputs = {
         "input_ids":
         torch.randint(
-            pipe.text_encoder.config.vocab_size,
+            text_encoder_vocab_size,
             (1, text_encoder_sequence_length),
             # https://github.com/apple/coremltools/issues/1423
             dtype=torch.float32,
@@ -396,11 +400,19 @@ def convert_text_encoder_xl(pipe, args, text_encoder_name):
         return
     
     reference_text_encoder = getattr(pipe, text_encoder_name)
+
+
+    # Create sample inputs for tracing, conversion and correctness verification
+    if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+        reference_text_encoder = pipe.text_encoder
+        text_encoder_sequence_length = pipe.tokenizer.model_max_length
+    elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+        reference_text_encoder = pipe.text_encoder_2
+        text_encoder_sequence_length = pipe.tokenizer_2.model_max_length
+
     reference_text_encoder.to(args.device)
     reference_text_encoder.config.layer_norm_eps = np.float16(reference_text_encoder.config.layer_norm_eps)
 
-    # Create sample inputs for tracing, conversion and correctness verification
-    text_encoder_sequence_length = pipe.tokenizer.model_max_length
     text_encoder_hidden_size = args.text_encoder_hidden_size or reference_text_encoder.config.hidden_size
 
     sample_text_encoder_inputs = {
@@ -849,16 +861,21 @@ def convert_unet(pipe, args):
             args.latent_w or pipe.unet.config.sample_size,  # W
         )
 
-        if not hasattr(pipe, "text_encoder"):
+        if not hasattr(pipe, "text_encoder") and not hasattr(pipe, "text_encoder_2"):
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
+
+        if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+            text_token_sequence_length = pipe.text_encoder.config.max_position_embeddings
+        elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+            text_token_sequence_length = pipe.text_encoder_2.config.max_position_embeddings
 
         encoder_hidden_states_shape = (
             batch_size,
             args.text_encoder_hidden_size or pipe.unet.config.cross_attention_dim,
             1,
-            args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
+            args.text_token_sequence_length or text_token_sequence_length
         )
 
         # Create the scheduled timesteps for downstream use
@@ -875,8 +892,12 @@ def convert_unet(pipe, args):
 
         # Setup appropriate unet SD model
         if args.is_sdxl:
+            # Time id shape based on whether aesthetics score is required
+            requires_aesthetics_score = hasattr(pipe.config, "requires_aesthetics_score") and pipe.config.requires_aesthetics_score
+            time_ids_dimension = 5 if requires_aesthetics_score else 6
+            time_ids_shape = (batch_size, time_ids_dimension)
+            # Text embeds shape based on projection dim
             text_embeds_shape = (batch_size, pipe.text_encoder_2.config.projection_dim)
-            time_ids_shape = (batch_size, 6)
             sample_unet_inputs["text_embeds"] = torch.rand(*text_embeds_shape)
             sample_unet_inputs["time_ids"] = torch.rand(*time_ids_shape)
 
@@ -1258,7 +1279,7 @@ def convert_controlnet(pipe, args):
             "convert_unet() deletes pipe.unet to save RAM. "
             "Please use convert_vae_encoder() before convert_unet()")
 
-    if not hasattr(pipe, "text_encoder"):
+    if not hasattr(pipe, "text_encoder") and not hasattr(pipe, "text_encoder_2"):
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
@@ -1296,11 +1317,16 @@ def convert_controlnet(pipe, args):
                 (args.latent_w or pipe.unet.config.sample_size),  # W
             )
 
+            if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+                text_token_sequence_length = pipe.text_encoder.config.max_position_embeddings
+            elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+                text_token_sequence_length = pipe.text_encoder_2.config.max_position_embeddings
+
             encoder_hidden_states_shape = (
                 batch_size,
-                args.text_encoder_hidden_size or pipe.text_encoder.config.hidden_size,
+                args.text_encoder_hidden_size or pipe.unet.config.cross_attention_dim,
                 1,
-                args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
+                args.text_token_sequence_length or text_token_sequence_length
             )
 
             controlnet_cond_shape = (
@@ -1438,7 +1464,15 @@ def main(args):
         pipe.to(args.device)
         # TODO: SPLIT_EINSUM needs updating to support SDXL architecture
         # current implementation results in a longer load and inference times
+    elif args.pipeline_type == "SDXL_REFINER":
+        args.is_sdxl = True
+        logger.info(
+            f"Initializing StableDiffusionXLImg2ImgPipeline with {args.model_version}..")
+        pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(args.model_version,
+                                                                use_auth_token=True)
+        pipe.to(args.device)
     else:
+        args.is_sdxl = False
         logger.info(
             f"Initializing StableDiffusionPipeline with {args.model_version}..")
         pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
@@ -1608,7 +1642,7 @@ def parser_spec():
     parser.add_argument(
         "--pipeline-type",
         default="SD",
-        choices=("SDXL", "SD"),
+        choices=("SD", "SDXL", "SDXL_REFINER"),
         type=str,
         help="If specified, use StableDiffusionXLPipeline instead of StableDiffusionPipeline")
 
