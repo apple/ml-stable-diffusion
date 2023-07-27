@@ -36,6 +36,9 @@ struct StableDiffusionSample: ParsableCommand {
     )
     var resourcePath: String = "./"
     
+    @Flag(name: .customLong("xl"), help: "The resources correspond to a Stable Diffusion XL model")
+    var isXL: Bool = false
+
     @Option(help: "Path to starting image.")
     var image: String? = nil
     
@@ -109,17 +112,31 @@ struct StableDiffusionSample: ParsableCommand {
 
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
-        let pipeline: StableDiffusionPipeline
+        let pipeline: StableDiffusionPipelineProtocol
         if #available(macOS 14.0, iOS 17.0, *) {
-            pipeline = try StableDiffusionPipeline(
-                resourcesAt: resourceURL,
-                controlNet: controlnet,
-                configuration: config,
-                disableSafety: disableSafety,
-                reduceMemory: reduceMemory,
-                useMultilingualTextEncoder: useMultilingualTextEncoder,
-                script: script
-            )
+            if isXL {
+                if !controlnet.isEmpty {
+                    throw RunError.unsupported("ControlNet is not supported for Stable Diffusion XL")
+                }
+                if useMultilingualTextEncoder {
+                    throw RunError.unsupported("Multilingual text encoder is not yet supported for Stable Diffusion XL")
+                }
+                pipeline = try StableDiffusionXLPipeline(
+                    resourcesAt: resourceURL,
+                    configuration: config,
+                    reduceMemory: reduceMemory
+                )
+            } else {
+                pipeline = try StableDiffusionPipeline(
+                    resourcesAt: resourceURL,
+                    controlNet: controlnet,
+                    configuration: config,
+                    disableSafety: disableSafety,
+                    reduceMemory: reduceMemory,
+                    useMultilingualTextEncoder: useMultilingualTextEncoder,
+                    script: script
+                )
+            }
         } else  {
             pipeline = try StableDiffusionPipeline(
                 resourcesAt: resourceURL,
@@ -285,6 +302,7 @@ struct StableDiffusionSample: ParsableCommand {
 enum RunError: Error {
     case resources(String)
     case saving(String)
+    case unsupported(String)
 }
 
 @available(iOS 16.2, macOS 13.1, *)

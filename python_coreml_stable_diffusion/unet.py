@@ -116,15 +116,8 @@ def linear_to_conv2d_map(state_dict, prefix, local_metadata, strict,
     """ Unsqueeze twice to map nn.Linear weights to nn.Conv2d weights
     """
     for k in state_dict:
-        is_internal_proj = all(substr in k for substr in ["to_", ".weight"])
-        is_ff_proj = all(substr in k for substr in ["ff.", ".weight"])
-        is_temb_proj = all(substr in k for substr in ["time_emb", ".weight"])
-        is_proj_in = "proj_in.weight" in k
-        is_proj_out = "proj_out.weight" in k
-
-        if is_internal_proj or is_ff_proj or is_temb_proj or is_proj_in or is_proj_out:
-            if len(state_dict[k].shape) == 2:
-                state_dict[k] = state_dict[k][:, :, None, None]
+        if 'weight' in k and len(state_dict[k].shape) == 2:
+            state_dict[k] = state_dict[k][:, :, None, None]
 
 # Note: torch.nn.LayerNorm and ane_transformers.reference.layer_norm.LayerNormANE
 # apply scale and bias terms in opposite orders. In order to accurately restore a
@@ -167,6 +160,7 @@ class CrossAttnUpBlock2D(nn.Module):
         output_scale_factor=1.0,
         downsample_padding=1,
         add_upsample=True,
+        transformer_layers_per_block=1,
     ):
         super().__init__()
         resnets = []
@@ -194,7 +188,7 @@ class CrossAttnUpBlock2D(nn.Module):
                     out_channels,
                     attn_num_head_channels,
                     out_channels // attn_num_head_channels,
-                    depth=1,
+                    depth=transformer_layers_per_block,
                     context_dim=cross_attention_dim,
                 ))
         self.attentions = nn.ModuleList(attentions)
@@ -285,6 +279,7 @@ class CrossAttnDownBlock2D(nn.Module):
         in_channels,
         out_channels,
         temb_channels,
+        transformer_layers_per_block=1,
         num_layers=1,
         resnet_eps=1e-6,
         resnet_time_scale_shift="default",
@@ -320,7 +315,7 @@ class CrossAttnDownBlock2D(nn.Module):
                     out_channels,
                     attn_num_head_channels,
                     out_channels // attn_num_head_channels,
-                    depth=1,
+                    depth=transformer_layers_per_block,
                     context_dim=cross_attention_dim,
                 ))
         self.attentions = nn.ModuleList(attentions)
@@ -360,6 +355,7 @@ class DownBlock2D(nn.Module):
         resnet_time_scale_shift="default",
         resnet_act_fn="swish",
         resnet_groups=32,
+        add_downsample=True,
     ):
         super().__init__()
         resnets = []
@@ -378,12 +374,24 @@ class DownBlock2D(nn.Module):
 
         self.resnets = nn.ModuleList(resnets)
 
+        if add_downsample:
+            self.downsamplers = nn.ModuleList([Downsample2D(out_channels)])
+        else:
+            self.downsamplers = None
+
     def forward(self, hidden_states, temb=None):
         output_states = ()
 
         for resnet in self.resnets:
             hidden_states = resnet(hidden_states, temb)
             output_states += (hidden_states, )
+
+        if self.downsamplers is not None:
+            for downsampler in self.downsamplers:
+                hidden_states = downsampler(hidden_states)
+
+            output_states = output_states + (hidden_states,)
+
 
         return hidden_states, output_states
 
@@ -602,28 +610,68 @@ class GEGLU(nn.Module):
         return hidden_states * F.gelu(gate)
 
 
-class TimestepEmbedding(nn.Module):
+def get_activation(act_fn):
+    if act_fn in ["swish", "silu"]:
+        return nn.SiLU()
+    elif act_fn == "mish":
+        return nn.Mish()
+    elif act_fn == "gelu":
+        return nn.GELU()
+    else:
+        raise ValueError(f"Unsupported activation function: {act_fn}")
 
-    def __init__(self, channel, time_embed_dim, act_fn="silu"):
+class TimestepEmbedding(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        time_embed_dim,
+        act_fn = "silu",
+        out_dim = None,
+        post_act_fn = None,
+        cond_proj_dim=None,
+    ):
         super().__init__()
 
-        self.linear_1 = nn.Conv2d(channel, time_embed_dim, kernel_size=1)
-        self.act = None
-        if act_fn == "silu":
-            self.act = nn.SiLU()
-        self.linear_2 = nn.Conv2d(time_embed_dim,
-                                  time_embed_dim,
-                                  kernel_size=1)
+        self.linear_1 = nn.Conv2d(
+            in_channels, time_embed_dim, kernel_size=1)
 
-    def forward(self, sample):
+        if cond_proj_dim is not None:
+            self.cond_proj = nn.Conv2d(
+                cond_proj_dim, in_channels, kernel_size=1, bias=False)
+        else:
+            self.cond_proj = None
+
+        self.act = get_activation(act_fn)
+
+        if out_dim is not None:
+            time_embed_dim_out = out_dim
+        else:
+            time_embed_dim_out = time_embed_dim
+        self.linear_2 = nn.Conv2d(
+            time_embed_dim, time_embed_dim_out, kernel_size=1)
+
+        if post_act_fn is None:
+            self.post_act = None
+        else:
+            self.post_act = get_activation(post_act_fn)
+
+    def forward(self, sample, condition=None):
         if len(sample.shape) == 2:
             sample = sample.unsqueeze(-1).unsqueeze(-1)
+
+        if condition is not None:
+            if len(condition.shape) == 2:
+                condition = condition.unsqueeze(-1).unsqueeze(-1)
+            sample = sample + self.cond_proj(condition)
         sample = self.linear_1(sample)
 
         if self.act is not None:
             sample = self.act(sample)
 
         sample = self.linear_2(sample)
+
+        if self.post_act is not None:
+            sample = self.post_act(sample)
         return sample
 
 
@@ -687,6 +735,7 @@ class UNetMidBlock2DCrossAttn(nn.Module):
         attn_num_head_channels=1,
         attention_type="default",
         cross_attention_dim=768,
+        transformer_layers_per_block=1,
         **kwargs,
     ):
         super().__init__()
@@ -714,7 +763,7 @@ class UNetMidBlock2DCrossAttn(nn.Module):
                     in_channels,
                     attn_num_head_channels,
                     in_channels // attn_num_head_channels,
-                    depth=1,
+                    depth=transformer_layers_per_block,
                     context_dim=cross_attention_dim,
                 ))
             resnets.append(
@@ -756,6 +805,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             "CrossAttnDownBlock2D",
             "DownBlock2D",
         ),
+        mid_block_type="UNetMidBlock2DCrossAttn",
         up_block_types=("UpBlock2D", "CrossAttnUpBlock2D",
                         "CrossAttnUpBlock2D", "CrossAttnUpBlock2D"),
         only_cross_attention=False,
@@ -767,7 +817,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         norm_num_groups=32,
         norm_eps=1e-5,
         cross_attention_dim=768,
+        transformer_layers_per_block=1,
         attention_head_dim=8,
+        addition_embed_type=None,
+        addition_time_embed_dim=None,
+        projection_class_embeddings_input_dim=None,
         **kwargs,
     ):
         if kwargs.get("dual_cross_attention", None):
@@ -799,6 +853,21 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
         self.time_proj = time_proj
         self.time_embedding = time_embedding
+        self.encoder_hid_proj = None
+
+        if addition_embed_type == "text":
+            raise NotImplementedError
+        elif addition_embed_type == "text_image":
+            raise NotImplementedError
+        elif addition_embed_type == "text_time":
+            self.add_time_proj = Timesteps(addition_time_embed_dim, flip_sin_to_cos, freq_shift)
+            self.add_embedding = TimestepEmbedding(projection_class_embeddings_input_dim, time_embed_dim)
+        elif addition_embed_type == "image":
+            raise NotImplementedError
+        elif addition_embed_type == "image_hint":
+            raise NotImplementedError
+        elif addition_embed_type is not None:
+            raise ValueError(f"addition_embed_type: {addition_embed_type} must be None, 'text' or 'text_image'.")
 
         self.down_blocks = nn.ModuleList([])
         self.mid_block = None
@@ -810,6 +879,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         if isinstance(attention_head_dim, int):
             attention_head_dim = (attention_head_dim,) * len(down_block_types)
 
+        if isinstance(transformer_layers_per_block, int):
+            transformer_layers_per_block = [transformer_layers_per_block] * len(down_block_types)
+
         # down
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
@@ -819,6 +891,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
             down_block = get_down_block(
                 down_block_type,
+                transformer_layers_per_block=transformer_layers_per_block[i],
                 num_layers=layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
@@ -828,12 +901,15 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=downsample_padding,
+                add_downsample=not is_final_block,
             )
             self.down_blocks.append(down_block)
 
         # mid
+        assert mid_block_type == "UNetMidBlock2DCrossAttn"
         self.mid_block = UNetMidBlock2DCrossAttn(
             in_channels=block_out_channels[-1],
+            transformer_layers_per_block=transformer_layers_per_block[-1],
             temb_channels=time_embed_dim,
             resnet_eps=norm_eps,
             resnet_act_fn=act_fn,
@@ -847,6 +923,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
         reversed_attention_head_dim = list(reversed(attention_head_dim))
+        reversed_transformer_layers_per_block = list(reversed(transformer_layers_per_block))
+
         output_channel = reversed_block_out_channels[0]
         for i, up_block_type in enumerate(up_block_types):
             prev_output_channel = output_channel
@@ -860,6 +938,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             up_block = get_up_block(
                 up_block_type,
                 num_layers=layers_per_block + 1,
+                transformer_layers_per_block=reversed_transformer_layers_per_block[i],
                 in_channels=input_channel,
                 out_channels=output_channel,
                 prev_output_channel=prev_output_channel,
@@ -893,6 +972,110 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         # 0. Project (or look-up) time embeddings
         t_emb = self.time_proj(timestep)
         emb = self.time_embedding(t_emb)
+
+        # 1. center input if necessary
+        if self.config.center_input_sample:
+            sample = 2 * sample - 1.0
+
+        # 2. pre-process
+        sample = self.conv_in(sample)
+
+        # 3. down
+        down_block_res_samples = (sample, )
+        for downsample_block in self.down_blocks:
+            if hasattr(
+                    downsample_block,
+                    "attentions") and downsample_block.attentions is not None:
+                sample, res_samples = downsample_block(
+                    hidden_states=sample,
+                    temb=emb,
+                    encoder_hidden_states=encoder_hidden_states)
+            else:
+                sample, res_samples = downsample_block(hidden_states=sample,
+                                                       temb=emb)
+
+            down_block_res_samples += res_samples
+
+        if additional_residuals:
+            new_down_block_res_samples = ()
+            for i, down_block_res_sample in enumerate(down_block_res_samples):
+                down_block_res_sample = down_block_res_sample + additional_residuals[i]
+                new_down_block_res_samples += (down_block_res_sample,)
+            down_block_res_samples = new_down_block_res_samples
+
+        # 4. mid
+        sample = self.mid_block(sample,
+                                emb,
+                                encoder_hidden_states=encoder_hidden_states)
+
+        if additional_residuals:
+            sample = sample + additional_residuals[-1]
+
+        # 5. up
+        for upsample_block in self.up_blocks:
+            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
+            down_block_res_samples = down_block_res_samples[:-len(
+                upsample_block.resnets)]
+
+            if hasattr(upsample_block,
+                       "attentions") and upsample_block.attentions is not None:
+                sample = upsample_block(
+                    hidden_states=sample,
+                    temb=emb,
+                    res_hidden_states_tuple=res_samples,
+                    encoder_hidden_states=encoder_hidden_states,
+                )
+            else:
+                sample = upsample_block(hidden_states=sample,
+                                        temb=emb,
+                                        res_hidden_states_tuple=res_samples)
+
+        # 6. post-process
+        sample = self.conv_norm_out(sample)
+        sample = self.conv_act(sample)
+        sample = self.conv_out(sample)
+
+        return (sample, )
+
+
+class UNet2DConditionModelXL(UNet2DConditionModel):
+    """ UNet2DConditionModel variant for Stable Diffusion XL
+    with an extended forward() signature
+    """
+    def forward(
+        self,
+        sample,
+        timestep,
+        encoder_hidden_states,
+        time_ids,
+        text_embeds,
+        *additional_residuals,
+    ):
+        # 0. Project time embeddings
+        t_emb = self.time_proj(timestep)
+        emb = self.time_embedding(t_emb)
+
+        aug_emb = None
+
+        if self.config.addition_embed_type == "text":
+            raise NotImplementedError
+        elif self.config.addition_embed_type == "text_image":
+            raise NotImplementedError
+        elif self.config.addition_embed_type == "text_time":
+            assert time_ids is not None
+            assert text_embeds is not None
+
+            time_embeds = self.add_time_proj(time_ids.flatten())
+            time_embeds = time_embeds.reshape((text_embeds.shape[0], -1))
+
+            add_embeds = torch.concat([text_embeds, time_embeds], dim=-1)
+            aug_emb = self.add_embedding(add_embeds)
+        elif self.config.addition_embed_type == "image":
+            raise NotImplementedError
+        elif self.config.addition_embed_type == "image_hint":
+            raise NotImplementedError
+
+        emb = emb + aug_emb if aug_emb is not None else emb
 
         # 1. center input if necessary
         if self.config.center_input_sample:
@@ -968,8 +1151,10 @@ def get_down_block(
     resnet_eps,
     resnet_act_fn,
     attn_num_head_channels,
+    transformer_layers_per_block=1,
     cross_attention_dim=None,
     downsample_padding=None,
+    add_downsample=True,
 ):
     down_block_type = down_block_type[7:] if down_block_type.startswith(
         "UNetRes") else down_block_type
@@ -981,6 +1166,7 @@ def get_down_block(
             temb_channels=temb_channels,
             resnet_eps=resnet_eps,
             resnet_act_fn=resnet_act_fn,
+            add_downsample=add_downsample,
         )
     elif down_block_type == "CrossAttnDownBlock2D":
         if cross_attention_dim is None:
@@ -989,6 +1175,7 @@ def get_down_block(
             )
         return CrossAttnDownBlock2D(
             num_layers=num_layers,
+            transformer_layers_per_block=transformer_layers_per_block,
             in_channels=in_channels,
             out_channels=out_channels,
             temb_channels=temb_channels,
@@ -997,6 +1184,7 @@ def get_down_block(
             downsample_padding=downsample_padding,
             cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
+            add_downsample=add_downsample,
         )
 
 
@@ -1011,6 +1199,7 @@ def get_up_block(
     resnet_eps,
     resnet_act_fn,
     attn_num_head_channels,
+    transformer_layers_per_block=1,
     cross_attention_dim=None,
 ):
     up_block_type = up_block_type[7:] if up_block_type.startswith(
@@ -1041,6 +1230,7 @@ def get_up_block(
             resnet_act_fn=resnet_act_fn,
             cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
+            transformer_layers_per_block=transformer_layers_per_block,
         )
     raise ValueError(f"{up_block_type} does not exist.")
 

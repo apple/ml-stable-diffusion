@@ -23,6 +23,9 @@ setup(
         "numpy<1.24",
         "pytest",
         "scikit-learn",
+        "invisible-watermark",
+        "safetensors",
+        "matplotlib",
     ],
     packages=find_packages(),
     classifiers=[

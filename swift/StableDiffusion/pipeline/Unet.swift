@@ -127,6 +127,65 @@ public struct Unet: ResourceManaging {
         return noise
     }
 
+    /// Batch prediction noise from latent samples, for Stable Diffusion XL
+    ///
+    /// - Parameters:
+    ///   - latents: Batch of latent samples in an array
+    ///   - timeStep: Current diffusion timestep
+    ///   - hiddenStates: Hidden state to condition on
+    ///   - pooledStates: Additional text states to condition on
+    ///   - geometryConditioning: Condition on image geometry
+    /// - Returns: Array of predicted noise residuals
+    @available(iOS 17.0, macOS 14.0, *)
+    func predictNoise(
+        latents: [MLShapedArray<Float32>],
+        timeStep: Int,
+        hiddenStates: MLShapedArray<Float32>,
+        pooledStates: MLShapedArray<Float32>,
+        geometryConditioning: MLShapedArray<Float32>
+    ) throws -> [MLShapedArray<Float32>] {
+
+        // Match time step batch dimension to the model / latent samples
+        let t = MLShapedArray<Float32>(scalars:[Float(timeStep), Float(timeStep)],shape:[2])
+
+        // Form batch input to model
+        let inputs = try latents.enumerated().map {
+            let dict: [String: Any] = [
+                "sample" : MLMultiArray($0.element),
+                "timestep" : MLMultiArray(t),
+                "encoder_hidden_states": MLMultiArray(hiddenStates),
+                "text_embeds": MLMultiArray(pooledStates),
+                "time_ids": MLMultiArray(geometryConditioning)
+            ]
+            return try MLDictionaryFeatureProvider(dictionary: dict)
+        }
+        let batch = MLArrayBatchProvider(array: inputs)
+
+        // Make predictions
+        let results = try predictions(from: batch)
+
+        // Pull out the results in Float32 format
+        let noise = (0..<results.count).map { i in
+
+            let result = results.features(at: i)
+            let outputName = result.featureNames.first!
+
+            let outputNoise = result.featureValue(for: outputName)!.multiArrayValue!
+
+            // To conform to this func return type make sure we return float32
+            // Use the fact that the concatenating constructor for MLMultiArray
+            // can do type conversion:
+            let fp32Noise = MLMultiArray(
+                concatenating: [outputNoise],
+                axis: 0,
+                dataType: .float32
+            )
+            return MLShapedArray<Float32>(fp32Noise)
+        }
+
+        return noise
+    }
+
     func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
 
         var results = try models.first!.perform { model in

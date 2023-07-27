@@ -23,18 +23,38 @@ public enum StableDiffusionRNG {
     case torchRNG
 }
 
+public enum PipelineError: String, Swift.Error {
+    case startingImageProvidedWithoutEncoder
+    case unsupportedOSVersion
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+public protocol StableDiffusionPipelineProtocol: ResourceManaging {
+    var canSafetyCheck: Bool { get }
+
+    func generateImages(
+        configuration config: PipelineConfiguration,
+        progressHandler: (PipelineProgress) -> Bool
+    ) throws -> [CGImage?]
+
+    func decodeToImages(
+        _ latents: [MLShapedArray<Float32>],
+        configuration config: PipelineConfiguration
+    ) throws -> [CGImage?]
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension StableDiffusionPipelineProtocol {
+    var canSafetyCheck: Bool { false }
+}
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
 @available(iOS 16.2, macOS 13.1, *)
-public struct StableDiffusionPipeline: ResourceManaging {
-    
-    public enum Error: String, Swift.Error {
-        case startingImageProvidedWithoutEncoder
-        case unsupportedOSVersion
-    }
-    
+public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
+
     /// Model to generate embeddings for tokenized input text
     var textEncoder: TextEncoderModel
 
@@ -253,7 +273,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
             noise = performGuidance(noise, config.guidanceScale)
 
-            // Retreive denoised latents from scheduler to pass into progress report
+            // Retrieve denoised latents from scheduler to pass into progress report
             var denoisedLatents: [MLShapedArray<Float32>] = []
 
             // Have the scheduler compute the previous (t-1) latent
@@ -296,15 +316,6 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return try decodeToImages(latents, configuration: config)
     }
 
-    private func randomSource(from rng: StableDiffusionRNG, seed: UInt32) -> RandomSource {
-        switch rng {
-        case .numpyRNG:
-            return NumPyRandomSource(seed: seed)
-        case .torchRNG:
-            return TorchRandomSource(seed: seed)
-        }
-    }
-
     func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
@@ -317,12 +328,78 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
         if let image = config.startingImage, config.mode == .imageToImage {
             guard let encoder else {
-                throw Error.startingImageProvidedWithoutEncoder
+                throw PipelineError.startingImageProvidedWithoutEncoder
             }
             let latent = try encoder.encode(image, scaleFactor: config.encoderScaleFactor, random: &random)
             return scheduler.addNoise(originalSample: latent, noise: samples, strength: config.strength)
         }
         return samples
+    }
+
+    public func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
+        let images = try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
+        if reduceMemory {
+            decoder.unloadResources()
+        }
+
+        // If safety is disabled return what was decoded
+        if config.disableSafety {
+            return images
+        }
+
+        // If there is no safety checker return what was decoded
+        guard let safetyChecker = safetyChecker else {
+            return images
+        }
+
+        // Otherwise change images which are not safe to nil
+        let safeImages = try images.map { image in
+            try safetyChecker.isSafe(image) ? image : nil
+        }
+
+        if reduceMemory {
+            safetyChecker.unloadResources()
+        }
+
+        return safeImages
+    }
+
+}
+
+/// Sampling progress details
+@available(iOS 16.2, macOS 13.1, *)
+public struct PipelineProgress {
+    public let pipeline: StableDiffusionPipelineProtocol
+    public let prompt: String
+    public let step: Int
+    public let stepCount: Int
+    public let currentLatentSamples: [MLShapedArray<Float32>]
+    public let configuration: PipelineConfiguration
+    public var isSafetyEnabled: Bool {
+        pipeline.canSafetyCheck && !configuration.disableSafety
+    }
+    public var currentImages: [CGImage?] {
+        try! pipeline.decodeToImages(currentLatentSamples, configuration: configuration)
+    }
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+public extension StableDiffusionPipeline {
+    /// Sampling progress details
+    typealias Progress = PipelineProgress
+}
+
+// Helper functions
+
+@available(iOS 16.2, macOS 13.1, *)
+extension StableDiffusionPipelineProtocol {
+    internal func randomSource(from rng: StableDiffusionRNG, seed: UInt32) -> RandomSource {
+        switch rng {
+        case .numpyRNG:
+            return NumPyRandomSource(seed: seed)
+        case .torchRNG:
+            return TorchRandomSource(seed: seed)
+        }
     }
 
     func toHiddenStates(_ embedding: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
@@ -358,54 +435,6 @@ public struct StableDiffusionPipeline: ResourceManaging {
                     )
                 }
             }
-        }
-    }
-
-    func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
-        let images = try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
-        if reduceMemory {
-            decoder.unloadResources()
-        }
-
-        // If safety is disabled return what was decoded
-        if config.disableSafety {
-            return images
-        }
-
-        // If there is no safety checker return what was decoded
-        guard let safetyChecker = safetyChecker else {
-            return images
-        }
-
-        // Otherwise change images which are not safe to nil
-        let safeImages = try images.map { image in
-            try safetyChecker.isSafe(image) ? image : nil
-        }
-
-        if reduceMemory {
-            safetyChecker.unloadResources()
-        }
-
-        return safeImages
-    }
-
-}
-
-@available(iOS 16.2, macOS 13.1, *)
-extension StableDiffusionPipeline {
-    /// Sampling progress details
-    public struct Progress {
-        public let pipeline: StableDiffusionPipeline
-        public let prompt: String
-        public let step: Int
-        public let stepCount: Int
-        public let currentLatentSamples: [MLShapedArray<Float32>]
-        public let configuration: Configuration
-        public var isSafetyEnabled: Bool {
-            pipeline.canSafetyCheck && !configuration.disableSafety
-        }
-        public var currentImages: [CGImage?] {
-            try! pipeline.decodeToImages(currentLatentSamples, configuration: configuration)
         }
     }
 }

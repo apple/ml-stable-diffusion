@@ -5,3 +5,6 @@ transformers==4.29.2
 scipy
 scikit-learn
 pytest
+invisible-watermark
+safetensors
+matplotlib

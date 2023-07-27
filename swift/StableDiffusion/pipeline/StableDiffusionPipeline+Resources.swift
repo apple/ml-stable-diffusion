@@ -72,7 +72,7 @@ public extension StableDiffusionPipeline {
 
 #if canImport(NaturalLanguage.NLScript)
         if useMultilingualTextEncoder {
-            guard #available(macOS 14.0, iOS 17.0, *) else { throw Error.unsupportedOSVersion }
+            guard #available(macOS 14.0, iOS 17.0, *) else { throw PipelineError.unsupportedOSVersion }
             textEncoder = MultilingualTextEncoder(
                 modelAt: urls.multilingualTextEncoderProjectionURL,
                 configuration: config,

@@ -12,14 +12,14 @@ public struct BPETokenizer {
     /// A dictionary from of tokens to identifiers.
     let vocabulary: [String: Int]
 
+    /// The token used for padding
+    let padToken: String
+
     /// The start token.
     let startToken: String = "<|startoftext|>"
 
     /// The end token.
     let endToken: String = "<|endoftext|>"
-
-    /// The token used for padding
-    let padToken: String = "<|endoftext|>"
 
     /// The unknown token.
     let unknownToken: String = "<|endoftext|>"
@@ -33,9 +33,10 @@ public struct BPETokenizer {
     /// - Parameters:
     ///   - merges: A dictionary that maps pairs of tokens to the rank/order of the merge.
     ///   - vocabulary: A dictionary from of tokens to identifiers.
-    public init(merges: [TokenPair: Int], vocabulary: [String: Int]) {
+    public init(merges: [TokenPair: Int], vocabulary: [String: Int], padToken: String = "<|endoftext|>") {
         self.merges = merges
         self.vocabulary = vocabulary
+        self.padToken = padToken
     }
 
     /// Creates a tokenizer by loading merges and vocabulary from URLs.
@@ -43,9 +44,10 @@ public struct BPETokenizer {
     /// - Parameters:
     ///   - mergesURL: The URL of a text file containing merges.
     ///   - vocabularyURL: The URL of a JSON file containing the vocabulary.
-    public init(mergesAt mergesURL: URL, vocabularyAt vocabularyURL: URL) throws {
+    public init(mergesAt mergesURL: URL, vocabularyAt vocabularyURL: URL, padToken: String = "<|endoftext|>") throws {
         self.merges = try Self.readMerges(url: mergesURL)
         self.vocabulary = try! Self.readVocabulary(url: vocabularyURL)
+        self.padToken = padToken
     }
 
     /// Tokenizes an input string.
