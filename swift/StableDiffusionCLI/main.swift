@@ -177,7 +177,7 @@ struct StableDiffusionSample: ParsableCommand {
         let sampleTimer = SampleTimer()
         sampleTimer.start()
 
-        var pipelineConfig = StableDiffusionPipelineXL.Configuration(prompt: prompt)
+        var pipelineConfig = StableDiffusionPipeline.Configuration(prompt: prompt)
 
         pipelineConfig.negativePrompt = negativePrompt
         pipelineConfig.startingImage = startingImage
@@ -216,7 +216,7 @@ struct StableDiffusionSample: ParsableCommand {
     }
 
     func handleProgress(
-        _ progress: StableDiffusionPipelineXL.Progress,
+        _ progress: StableDiffusionPipeline.Progress,
         _ sampleTimer: SampleTimer
     ) {
         log("\u{1B}[1A\u{1B}[K")
