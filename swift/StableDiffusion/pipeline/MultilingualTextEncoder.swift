@@ -52,7 +52,7 @@ public struct MultilingualTextEncoder: TextEncoderModel {
     ///
     ///  - Parameter text: The input text.
     ///  - Returns: An embedding shaped array.
-    public func encode(_ text: String) throws -> MLShapedArray<Float> {
+    public func encode(_ text: String) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
         guard embeddingModel.hasAvailableAssets else {
             throw Error.missingEmbeddingResource
         }
@@ -78,10 +78,10 @@ public struct MultilingualTextEncoder: TextEncoderModel {
 
         if adapter == nil {
             // Return embeddings with shape [1, 256, 512].
-            return MLShapedArray(converting: shapedEmbeddings)
+            return (MLShapedArray(converting: shapedEmbeddings), nil)
         } else {
             // Project the embeddings to the correct CLIP model input shape of [1, 768, 1, 256].
-            return try projectEmbeddings(shapedEmbeddings)
+            return (try projectEmbeddings(shapedEmbeddings), nil)
         }
     }
 

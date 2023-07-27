@@ -7,7 +7,7 @@ import CoreML
 @available(iOS 16.2, macOS 13.1, *)
 public protocol TextEncoderModel: ResourceManaging {
 
-    func encode(_ text: String) throws -> MLShapedArray<Float32>
+    func encode(_ text: String) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>)
 }
 
 ///  A model for encoding text
@@ -49,7 +49,7 @@ public struct TextEncoder: TextEncoderModel {
     ///  - Parameters:
     ///     - text: Input text to be tokenized and then embedded
     ///  - Returns: Embedding representing the input text
-    public func encode(_ text: String) throws -> MLShapedArray<Float32> {
+    public func encode(_ text: String) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
 
         // Get models expected input length
         let inputLength = inputShape.last!
@@ -72,7 +72,7 @@ public struct TextEncoder: TextEncoderModel {
     /// Prediction queue
     let queue = DispatchQueue(label: "textencoder.predict")
 
-    func encode(ids: [Int]) throws -> MLShapedArray<Float32> {
+    func encode(ids: [Int]) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>)  {
         let inputName = inputDescription.name
         let inputShape = inputShape
 
@@ -86,7 +86,9 @@ public struct TextEncoder: TextEncoderModel {
         }
 
         let embeddingFeature = result.featureValue(for: "last_hidden_state")
-        return MLShapedArray<Float32>(converting: embeddingFeature!.multiArrayValue!)
+        let pooledFeature = result.featureValue(for: "pooled_outputs")
+        return (MLShapedArray<Float32>(converting: embeddingFeature!.multiArrayValue!),
+                MLShapedArray<Float32>(converting: pooledFeature!.multiArrayValue!))
     }
 
     var inputDescription: MLFeatureDescription {

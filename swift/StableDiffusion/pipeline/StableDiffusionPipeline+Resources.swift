@@ -11,6 +11,7 @@ public extension StableDiffusionPipeline {
     struct ResourceURLs {
 
         public let textEncoderURL: URL
+        public let textEncoder2URL: URL
         public let unetURL: URL
         public let unetChunk1URL: URL
         public let unetChunk2URL: URL
@@ -27,6 +28,7 @@ public extension StableDiffusionPipeline {
 
         public init(resourcesAt baseURL: URL) {
             textEncoderURL = baseURL.appending(path: "TextEncoder.mlmodelc")
+            textEncoder2URL = baseURL.appending(path: "TextEncoder2.mlmodelc")
             unetURL = baseURL.appending(path: "Unet.mlmodelc")
             unetChunk1URL = baseURL.appending(path: "UnetChunk1.mlmodelc")
             unetChunk2URL = baseURL.appending(path: "UnetChunk2.mlmodelc")
@@ -56,7 +58,7 @@ public extension StableDiffusionPipeline {
     ///   - script: Optional natural language script to use for the text encoder.
     /// - Returns:
     ///  Pipeline ready for image generation if all  necessary resources loaded
-    init(
+    convenience init(
         resourcesAt baseURL: URL,
         controlNet controlNetModelNames: [String],
         configuration config: MLModelConfiguration = .init(),
@@ -68,7 +70,8 @@ public extension StableDiffusionPipeline {
 
         /// Expect URL of each resource
         let urls = ResourceURLs(resourcesAt: baseURL)
-        let textEncoder: TextEncoderModel
+        var textEncoder: TextEncoderModel? = nil
+        var textEncoder2: TextEncoderModel? = nil
 
 #if canImport(NaturalLanguage.NLScript)
         if useMultilingualTextEncoder {
@@ -78,13 +81,26 @@ public extension StableDiffusionPipeline {
                 configuration: config,
                 script: script ?? .latin
             )
+            if FileManager.default.fileExists(atPath: urls.textEncoder2URL.path) {
+                throw Error.unsupportedModel
+            }
         } else {
             let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
-            textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+            if FileManager.default.fileExists(atPath: urls.textEncoderURL.path) {
+                textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+            }
+            if FileManager.default.fileExists(atPath: urls.textEncoder2URL.path) {
+                textEncoder2 = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoder2URL, configuration: config)
+            }
         }
 #else
         let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
-        textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+        if FileManager.default.fileExists(atPath: urls.textEncoderURL.path) {
+            textEncoder = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+        }
+        if FileManager.default.fileExists(atPath: urls.textEncoder2URL.path) {
+            textEncoder2 = TextEncoder(tokenizer: tokenizer, modelAt: urls.textEncoder2URL, configuration: config)
+        }
 #endif
 
         // ControlNet model
@@ -142,6 +158,7 @@ public extension StableDiffusionPipeline {
         if #available(macOS 14.0, iOS 17.0, *) {
             self.init(
                 textEncoder: textEncoder,
+                textEncoder2: textEncoder2,
                 unet: unet,
                 decoder: decoder,
                 encoder: encoder,
@@ -154,6 +171,7 @@ public extension StableDiffusionPipeline {
         } else {
             self.init(
                 textEncoder: textEncoder,
+                textEncoder2: textEncoder2,
                 unet: unet,
                 decoder: decoder,
                 encoder: encoder,

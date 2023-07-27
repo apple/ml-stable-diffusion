@@ -23,35 +23,53 @@ public enum StableDiffusionRNG {
     case torchRNG
 }
 
+
+/// Model types compatible with StableDiffusionPipeline
+public enum StableDiffusionPipelineType {
+    /// Pipeline for standard Stable Diffusion models 1.5 - 2.1
+    case sd
+    /// Pipeline for SDXL base models
+    case sdxl
+    /// Pipeline for SDXL refiner models
+//    case sdxlRefiner
+}
+
+
+
 /// A pipeline used to generate image samples from text input using stable diffusion
 ///
 /// This implementation matches:
 /// [Hugging Face Diffusers Pipeline](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
 @available(iOS 16.2, macOS 13.1, *)
-public struct StableDiffusionPipeline: ResourceManaging {
+public class StableDiffusionPipeline: ResourceManaging {
     
     public enum Error: String, Swift.Error {
         case startingImageProvidedWithoutEncoder
+        case startingGenerateImageWithoutTextEncoder
         case unsupportedOSVersion
+        case modelNotSupported
     }
-    
+
     /// Model to generate embeddings for tokenized input text
-    var textEncoder: TextEncoderModel
+    public var textEncoder: TextEncoderModel?
+
+    /// Model to generate embeddings for tokenized input text
+    public var textEncoder2: TextEncoderModel?
 
     /// Model used to predict noise residuals given an input, diffusion time step, and conditional embedding
-    var unet: Unet
+    public var unet: Unet
 
     /// Model used to generate final image from latent diffusion process
-    var decoder: Decoder
-    
+    public var decoder: Decoder
+
     /// Model used to latent space for image2image, and soon, in-painting
-    var encoder: Encoder?
+    public var encoder: Encoder?
 
     /// Optional model for checking safety of generated image
-    var safetyChecker: SafetyChecker? = nil
-    
+    public var safetyChecker: SafetyChecker? = nil
+
     /// Optional model used before Unet to control generated images by additonal inputs
-    var controlNet: ControlNet? = nil
+    public var controlNet: ControlNet? = nil
 
     /// Reports whether this pipeline can perform safety checks
     public var canSafetyCheck: Bool {
@@ -64,13 +82,13 @@ public struct StableDiffusionPipeline: ResourceManaging {
     /// when needed and aggressively unload their resources after
     ///
     /// This will increase latency in favor of reducing memory
-    var reduceMemory: Bool = false
+    public var reduceMemory: Bool = false
 
     /// Option to use system multilingual NLContextualEmbedding as encoder
-    var useMultilingualTextEncoder: Bool = false
+    public var useMultilingualTextEncoder: Bool = false
 
     /// Optional natural language script to use for the text encoder.
-    var script: Script? = nil
+    public var script: Script? = nil
 
     /// Creates a pipeline using the specified models and tokenizer
     ///
@@ -83,7 +101,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
     public init(
-        textEncoder: TextEncoderModel,
+        textEncoder: TextEncoderModel?,
+        textEncoder2: TextEncoderModel?,
         unet: Unet,
         decoder: Decoder,
         encoder: Encoder?,
@@ -92,6 +111,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         reduceMemory: Bool = false
     ) {
         self.textEncoder = textEncoder
+        self.textEncoder2 = textEncoder2
         self.unet = unet
         self.decoder = decoder
         self.encoder = encoder
@@ -114,7 +134,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
     /// - Returns: Pipeline ready for image generation
     @available(iOS 17.0, macOS 14.0, *)
     public init(
-        textEncoder: TextEncoderModel,
+        textEncoder: TextEncoderModel?,
+        textEncoder2: TextEncoderModel?,
         unet: Unet,
         decoder: Decoder,
         encoder: Encoder?,
@@ -125,6 +146,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         script: Script? = nil
     ) {
         self.textEncoder = textEncoder
+        self.textEncoder2 = textEncoder2
         self.unet = unet
         self.decoder = decoder
         self.encoder = encoder
@@ -144,7 +166,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
             try prewarmResources()
         } else {
             try unet.loadResources()
-            try textEncoder.loadResources()
+            try textEncoder?.loadResources()
+            try textEncoder2?.loadResources()
             try decoder.loadResources()
             try encoder?.loadResources()
             try controlNet?.loadResources()
@@ -154,7 +177,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     /// Unload the underlying resources to free up memory
     public func unloadResources() {
-        textEncoder.unloadResources()
+        textEncoder?.unloadResources()
+        textEncoder2?.unloadResources()
         unet.unloadResources()
         decoder.unloadResources()
         encoder?.unloadResources()
@@ -164,7 +188,8 @@ public struct StableDiffusionPipeline: ResourceManaging {
 
     // Prewarm resources one at a time
     public func prewarmResources() throws {
-        try textEncoder.prewarmResources()
+        try textEncoder?.prewarmResources()
+        try textEncoder2?.prewarmResources()
         try unet.prewarmResources()
         try decoder.prewarmResources()
         try encoder?.prewarmResources()
@@ -180,12 +205,15 @@ public struct StableDiffusionPipeline: ResourceManaging {
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
         configuration config: Configuration,
-        progressHandler: (Progress) -> Bool = { _ in true }
+        progressHandler: (Progress) -> Bool
     ) throws -> [CGImage?] {
 
         // Encode the input prompt and negative prompt
-        let promptEmbedding = try textEncoder.encode(config.prompt)
-        let negativePromptEmbedding = try textEncoder.encode(config.negativePrompt)
+        guard let textEncoder else {
+            throw Error.startingGenerateImageWithoutTextEncoder
+        }
+        let (promptEmbedding, _) = try textEncoder.encode(config.prompt)
+        let (negativePromptEmbedding, _) = try textEncoder.encode(config.negativePrompt)
 
         if reduceMemory {
             textEncoder.unloadResources()
@@ -305,7 +333,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
     }
 
-    func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
+    public func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
         var sampleShape = unet.latentSampleShape
         sampleShape[0] = 1
         
@@ -325,7 +353,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return samples
     }
 
-    func toHiddenStates(_ embedding: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
+    public func toHiddenStates(_ embedding: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
         // Unoptimized manual transpose [0, 2, None, 1]
         // e.g. From [2, 77, 768] to [2, 768, 1, 77]
         let fromShape = embedding.shape
@@ -341,11 +369,11 @@ public struct StableDiffusionPipeline: ResourceManaging {
         return states
     }
 
-    func performGuidance(_ noise: [MLShapedArray<Float32>], _ guidanceScale: Float) -> [MLShapedArray<Float32>] {
+    public func performGuidance(_ noise: [MLShapedArray<Float32>], _ guidanceScale: Float) -> [MLShapedArray<Float32>] {
         noise.map { performGuidance($0, guidanceScale) }
     }
 
-    func performGuidance(_ noise: MLShapedArray<Float32>, _ guidanceScale: Float) -> MLShapedArray<Float32> {
+    public func performGuidance(_ noise: MLShapedArray<Float32>, _ guidanceScale: Float) -> MLShapedArray<Float32> {
         var shape = noise.shape
         shape[0] = 1
         return MLShapedArray<Float>(unsafeUninitializedShape: shape) { result, _ in
@@ -361,7 +389,7 @@ public struct StableDiffusionPipeline: ResourceManaging {
         }
     }
 
-    func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
+    public func decodeToImages(_ latents: [MLShapedArray<Float32>], configuration config: Configuration) throws -> [CGImage?] {
         let images = try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
         if reduceMemory {
             decoder.unloadResources()

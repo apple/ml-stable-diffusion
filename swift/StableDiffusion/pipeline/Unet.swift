@@ -80,6 +80,8 @@ public struct Unet: ResourceManaging {
         latents: [MLShapedArray<Float32>],
         timeStep: Int,
         hiddenStates: MLShapedArray<Float32>,
+        textEmbeds: MLShapedArray<Float32>? = nil,
+        timeIds: MLShapedArray<Float32>? = nil,
         additionalResiduals: [[String: MLShapedArray<Float32>]]? = nil
     ) throws -> [MLShapedArray<Float32>] {
 
@@ -93,6 +95,10 @@ public struct Unet: ResourceManaging {
                 "timestep" : MLMultiArray(t),
                 "encoder_hidden_states": MLMultiArray(hiddenStates)
             ]
+            if let textEmbeds = textEmbeds, let timeIds = timeIds {
+                dict["text_embeds"] = MLMultiArray(textEmbeds)
+                dict["time_ids"] = MLMultiArray(timeIds)
+            }
             if let residuals = additionalResiduals?[$0.offset] {
                 for (k, v) in residuals {
                     dict[k] = MLMultiArray(v)

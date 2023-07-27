@@ -73,7 +73,10 @@ struct StableDiffusionSample: ParsableCommand {
 
     @Option(help: "Random number generator to use, one of {numpy, torch}")
     var rng: RNGOption = .numpy
-    
+
+    @Option(help: "Pipeline to use, one of {sd, sdxl}")
+    var pipelineType: PipelineOption = .SD
+
     @Option(
         parsing: .upToNextOption,
         help: "ControlNet models used in image generation (enter file names in Resources/controlnet without extension)"
@@ -109,25 +112,35 @@ struct StableDiffusionSample: ParsableCommand {
 
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
-        let pipeline: StableDiffusionPipeline
-        if #available(macOS 14.0, iOS 17.0, *) {
-            pipeline = try StableDiffusionPipeline(
+        var pipeline: StableDiffusionPipeline
+        if (pipelineType == .SDXL) {
+            pipeline = try StableDiffusionPipelineXL(
                 resourcesAt: resourceURL,
                 controlNet: controlnet,
                 configuration: config,
-                disableSafety: disableSafety,
-                reduceMemory: reduceMemory,
-                useMultilingualTextEncoder: useMultilingualTextEncoder,
-                script: script
-            )
-        } else  {
-            pipeline = try StableDiffusionPipeline(
-                resourcesAt: resourceURL,
-                controlNet: controlnet,
-                configuration: config,
-                disableSafety: disableSafety,
+                disableSafety: true,
                 reduceMemory: reduceMemory
             )
+        } else {
+            if #available(macOS 14.0, iOS 17.0, *) {
+                pipeline = try StableDiffusionPipeline(
+                    resourcesAt: resourceURL,
+                    controlNet: controlnet,
+                    configuration: config,
+                    disableSafety: disableSafety,
+                    reduceMemory: reduceMemory,
+                    useMultilingualTextEncoder: useMultilingualTextEncoder,
+                    script: script
+                )
+            } else  {
+                pipeline = try StableDiffusionPipeline(
+                    resourcesAt: resourceURL,
+                    controlNet: controlnet,
+                    configuration: config,
+                    disableSafety: disableSafety,
+                    reduceMemory: reduceMemory
+                )
+            }
         }
 
         try pipeline.loadResources()
@@ -164,8 +177,8 @@ struct StableDiffusionSample: ParsableCommand {
         let sampleTimer = SampleTimer()
         sampleTimer.start()
 
-        var pipelineConfig = StableDiffusionPipeline.Configuration(prompt: prompt)
-        
+        var pipelineConfig = StableDiffusionPipelineXL.Configuration(prompt: prompt)
+
         pipelineConfig.negativePrompt = negativePrompt
         pipelineConfig.startingImage = startingImage
         pipelineConfig.strength = strength
@@ -203,7 +216,7 @@ struct StableDiffusionSample: ParsableCommand {
     }
 
     func handleProgress(
-        _ progress: StableDiffusionPipeline.Progress,
+        _ progress: StableDiffusionPipelineXL.Progress,
         _ sampleTimer: SampleTimer
     ) {
         log("\u{1B}[1A\u{1B}[K")
@@ -318,6 +331,18 @@ enum RNGOption: String, ExpressibleByArgument {
         switch self {
         case .numpy: return .numpyRNG
         case .torch: return .torchRNG
+        }
+    }
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+enum PipelineOption: String, ExpressibleByArgument {
+    case SD, SDXL
+    var stableDiffusionPipeline: StableDiffusionPipelineType {
+        switch self {
+        case .SD: return .sd
+        case .SDXL: return .sdxl
+//        case .sdxlRefiner: return .sdxlRefiner
         }
     }
 }
