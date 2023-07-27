@@ -26,7 +26,7 @@ Project Build:
 
   macOS | Xcode | Swift |
 :------:|:-----:|:-----:|
-  14.0  | 15.0  |  5.8  |
+  13.1  | 14.3  |  5.8  |
 
 Target Device Runtime:
 
@@ -66,7 +66,6 @@ Target Device Hardware Generation:
 | Mac Studio (M1 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      4                 |        6.3               |
 | Mac Studio (M2 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      3                 |        7.6               |
 
-
 <details>
   <summary> Details (Click to expand) </summary>
 
@@ -86,6 +85,28 @@ Target Device Hardware Generation:
 
 </details>
 
+[`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base) Benchmark:
+
+|        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
+| --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
+| MacBook Pro (M1 Max)  | `CPU_AND_GPU`   |      `ORIGINAL`              |      46                |        0.46              |
+| MacBook Pro (M2 Max)  | `CPU_AND_GPU`   |      `ORIGINAL`              |      37                |        0.57              |
+| Mac Studio (M1 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      25                |        0.89              |
+| Mac Studio (M2 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      20                |        1.11              |
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+- This benchmark was conducted by Apple and Hugging Face using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 in July 2023.
+- The performance data was collected by running the `StableDiffusion` Swift pipeline.
+- The median latency value across 3 back-to-back end-to-end executions are reported
+- The image generation procedure follows the standard configuration: 20 inference steps, 1024x1024 output image resolution, classifier-free guidance (batch size of 2 for unet).
+- Weights and activations are in float16 precision
+- Performance may vary across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
+- Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state. Given these factors, we do not report sub-second variance in latency.
+
+</details>
+
 ## <a name="compression"></a> Weight Compression
 
 coremltools-7.0 supports advanced weight compression techniques for [pruning](https://coremltools.readme.io/v7.0/docs/pruning), [palettization](https://coremltools.readme.io/v7.0/docs/palettization-overview) and [linear 8-bit quantization](https://coremltools.readme.io/v7.0/docs/quantization-aware-training). For these techniques, `coremltools.optimize.torch.*` includes APIs that require fine-tuning to maintain accuracy at higher compression rates whereas `coremltools.optimize.coreml.*` includes APIs that are applied post-training and are data-free.
@@ -94,7 +115,7 @@ We demonstrate how data-free [post-training palettization](https://coremltools.r
 
 For best results, we recommend [training-time palettization](https://coremltools.readme.io/v7.0/docs/training-time-palettization): `coremltools.optimize.torch.palettization.DKMPalettizer` if fine-tuning your model is feasible. This API implements the [Differentiable k-Means (DKM)](https://machinelearning.apple.com/research/differentiable-k-means) learned palettization algorithm. In this exercise, we stick to post-training palettization for the sake of simplicity and ease of reproducibility.
 
-The Neural Engine is capable of accelerating models with low-bit palettization: 2, 4, 6 or 8 bits. With iOS 17 and macOS 14, compressed weights for Core ML models can be just-in-time decompressed during runtime (as opposed to ahead-of-time decompression upon load) to match the precision of activation tensors. This yields significant memory savings and enables models to run on devices with smaller RAM (e.g. iPhone 12 Mini). In addition, compressed weights are faster to fetch from memory which reduces the latency of memory bandwidth-bound layers. The just-in-time decompression behavior depends on the compute unit, layer type and hardware generation.
+The Neural Engine is capable of accelerating models with low-bit palettization: 1, 2, 4, 6 or 8 bits. With iOS 17 and macOS 14, compressed weights for Core ML models can be just-in-time decompressed during runtime (as opposed to ahead-of-time decompression upon load) to match the precision of activation tensors. This yields significant memory savings and enables models to run on devices with smaller RAM (e.g. iPhone 12 Mini). In addition, compressed weights are faster to fetch from memory which reduces the latency of memory bandwidth-bound layers. The just-in-time decompression behavior depends on the compute unit, layer type and hardware generation.
 
 | Weight Precision | `--compute-unit`   | [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base) generating *"a high quality photo of a surfing dog"* |
 | :---------------:| :----------------: | ------------------------------------------------------  |
@@ -102,11 +123,110 @@ The Neural Engine is capable of accelerating models with low-bit palettization: 
 | 16-bit           | cpuAndNeuralEngine | <img src="assets/float16_cpuandne_readmereel.png">  |
 | 16-bit           | cpuAndGPU          | <img src="assets/float16_gpu_readmereel.png"> |
 
-Note that there are minor differences across 16-bit (float16) and 6-bit results. These differences are comparable to the differences across float16 and float32 or differences across compute units as exemplified above. We recommend a minimum of 6 bits for palettizing Stable Diffusion. Smaller number of bits (2 and 4) will require fine-tuning to recover image generation quality as previously mentioned.
+Note that there are minor differences across 16-bit (float16) and 6-bit results. These differences are comparable to the differences across float16 and float32 or differences across compute units as exemplified above. We recommend a minimum of 6 bits for palettizing Stable Diffusion. Smaller number of bits (1, 2 and 4) will require either fine-tuning or advanced palettization techniques such as [MBP](#mbp).
 
 Resources:
 - [Core ML Tools Docs: Optimizing Models](https://coremltools.readme.io/v7.0/docs/optimizing-models)
 - [WWDC23 Session Video: Use Core ML Tools for machine learning model compression](https://developer.apple.com/videos/play/wwdc2023/10047)
+
+## <a name="mbp"></a> MBP: Post-Training Mixed-Bit Palettization
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+
+| 3.41-bit | 4.50-bit | 6.55-bit | 16-bit (original) |
+| :-------:| :-------:| :-------:| :----------------:|
+| <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_3.41-bits.png"> | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_4.50-bits.png">  | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_6.55-bits.png"> | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_float16_original.png"> |
+
+
+This is an advanced compression technique that picks a suitable number of bits (among 1, 2, 4, 6 and 8) in order to achieve the desired signal strength as measured by end-to-end PSNR. The compression rate depends on the model version as well as the tolerance for signal loss (drop in PSNR).
+
+For example, the original float16 [stabilityai/stable-diffusion-xl-base-1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) model has an ~82 dB signal strength. Naively applying [linear 8-bit quantization](https://coremltools.readme.io/docs/data-free-quantization) to the Unet model drops the signal to ~65 dB. Instead, applying MBP yields an average of 2.81-bits quantization while maintaining a signal strength of ~67 dB. This technique generally yields better results compared to using `--quantize-nbits` during model conversion but requires a "pre-analysis" run that takes up to a few hours on a single GPU (`mps` or `cuda`).
+
+Here is the signal strength (PSNR in dB) versus model size reduction (% of float16 size) for `stabilityai/stable-diffusion-xl-base-1.0`. The `{1,2,4,6,8}-bit` curves are generated by progresssively palettizing more layers using a palette with fixed number of bits. The layers were ordered in ascending order of their isolated impact to end-to-end signal strength so the cumulative compression's impact is delayed as much as possible. The mixed-bit curve is based on falling back to a higher number of bits as soon as a layer's isolated impact to end-to-end signal integrity drops below a threshold. Note that all curves based on palettization outperform linear 8-bit quantization at the same model size except for 1-bit.
+
+<img src="assets/mbp/stabilityai_stable-diffusion-xl-base-1.0_psnr_vs_size.png">
+
+Here are the steps for applying this technique on another model version:
+
+**Step 1:** Run the pre-analysis script to generate "recipes" with varying signal strength:
+
+```python
+python -m python_coreml_stable_diffusion.mixed_bit_compression_pre_analysis --model-version <model-version> -o <output-dir>
+```
+
+For popular base models, you may find the pre-computed pre-analysis results [here](https://huggingface.co/apple/coreml-stable-diffusion-mixed-bit-palettization/tree/main/recipes). Fine-tuned models models are likely to honor the recipes of their corresponding base models but this is untested.
+
+
+**Step 2:** The resulting JSON file from Step 1 will list "baselines", e.g.:
+
+```json
+{
+  "model_version": "stabilityai/stable-diffusion-xl-base-1.0",
+  "baselines": {
+    "original": 82.2,
+    "linear_8bit": 66.025,
+    "recipe_6.55_bit_mixedpalette": 79.9,
+    "recipe_5.52_bit_mixedpalette": 78.2,
+    "recipe_4.89_bit_mixedpalette": 76.8,
+    "recipe_4.41_bit_mixedpalette": 75.5,
+    "recipe_4.04_bit_mixedpalette": 73.2,
+    "recipe_3.67_bit_mixedpalette": 72.2,
+    "recipe_3.32_bit_mixedpalette": 71.4,
+    "recipe_3.19_bit_mixedpalette": 70.4,
+    "recipe_3.08_bit_mixedpalette": 69.6,
+    "recipe_2.98_bit_mixedpalette": 68.6,
+    "recipe_2.90_bit_mixedpalette": 67.8,
+    "recipe_2.83_bit_mixedpalette": 67.0,
+    "recipe_2.71_bit_mixedpalette": 66.3
+  },
+}
+```
+
+Among these baselines, select a recipe based on your desired signal strength. We recommend palettizing to ~4 bits depending on the use case even if the signal integrity for lower bit values are higher than the linear 8-bit quantization baseline.
+
+Finally, apply the selected recipe to the float16 Core ML model as follows:
+
+```python
+python -m python_coreml_stable_diffusion.mixed_bit_compression_apply --mlpackage-path <path-to-float16-unet-mlpackage> -o <output-dir> --pre-analysis-json-path <path-to--pre-analysis-json> --selected-recipe <selected-recipe-string-key>
+```
+
+An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalette"` which achieves an average of 4.50-bits compression (compressed from ~5.2GB to ~1.46GB for SDXL). Please note that signal strength does not directly map to image-text alignment. Always verify that your MBP-compressed model variant is accurately generating images for your test prompts.
+
+</details>
+
+## <a name="using-stable-diffusion-xl"></a> Using Stable Diffusion XL
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+### Model Conversion
+
+e.g.:
+
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-vae-decoder --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
+```
+
+- `--xl-version`: Additional argument to pass to the conversion script when specifying an XL model
+- `--attention-implementation ORIGINAL` (recommended for `cpuAndGPU`)
+- Due to known float16 overflow issues in the VAE, it runs in float32 precision for now
+
+### Inference
+
+e.g.
+
+```bash
+swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units cpuAndGPU --xl
+```
+
+- Only `--compute-units cpuAndGPU` is supported for now
+- Only the `base` model is supported, `refiner` model is not yet supported
+- ControlNet for XL is not yet supported
+
+
+</details>
 
 ## <a name="using-controlnet"></a> Using ControlNet
 
@@ -162,11 +282,15 @@ Resources:
   - [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base-palettized)
   - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base-palettized)
 
+* Mixed-bit quantized models
+- [`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-mixed-bit-palettization)
+
 * Uncompressed models:
   - [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
   - [`runwayml/stable-diffusion-v1-5`](https://huggingface.co/apple/coreml-stable-diffusion-v1-5)
   - [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
   - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base)
+  - [`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base)
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 
@@ -229,14 +353,14 @@ pip install -e .
 **Step 4:** Execute the following command from the Terminal to generate Core ML model files (`.mlpackage`)
 
 ```shell
-python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-text-encoder --convert-vae-decoder --convert-safety-checker -o <output-mlpackages-directory>
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-text-encoder --convert-vae-decoder --convert-safety-checker --model-version <model-version-string-from-hub> -o <output-mlpackages-directory>
 ```
 
 **WARNING:** This command will download several GB worth of PyTorch checkpoints from Hugging Face. Please ensure that you are on Wi-Fi and have enough disk space.
 
 This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful execution, the 4 neural network models that comprise Stable Diffusion will have been converted from PyTorch to Core ML (`.mlpackage`) and saved into the specified `<output-mlpackages-directory>`. Some additional notable arguments:
 
-- `--model-version`: The model version defaults to [CompVis/stable-diffusion-v1-4](https://huggingface.co/CompVis/stable-diffusion-v1-4). Developers may specify other versions that are available on [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion), e.g. [stabilityai/stable-diffusion-2-base](https://huggingface.co/stabilityai/stable-diffusion-2-base) & [runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5).
+- `--model-version`: The model version name as published on the [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion)
 
 
 - `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline.
@@ -252,6 +376,8 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 - `--convert-controlnet`: Converts ControlNet models specified after this option. This can also convert multiple models if you specify like `--convert-controlnet lllyasviel/sd-controlnet-mlsd lllyasviel/sd-controlnet-depth`.
 
 - `--unet-support-controlnet`: enables a converted UNet model to receive additional inputs from ControlNet. This is required for generating image with using ControlNet and saved with a different name, `*_control-unet.mlpackage`, distinct from normal UNet. On the other hand, this UNet model can not work without ControlNet. Please use normal UNet for just txt2img.
+
+- `--convert-vae-encoder`: not required for text-to-image applications. Required for image-to-image applications in order to map the input image to the latent space.
 
 </details>
 
@@ -373,11 +499,11 @@ Hugging Face has made the app [available in the Mac App Store](https://apps.appl
 <b> A3: </b>  In order to minimize the memory impact of the model conversion process, please execute the following command instead:
 
 ```bash
-python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-encoder -o <output-mlpackages-directory> && \
-python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-decoder -o <output-mlpackages-directory> && \
-python -m python_coreml_stable_diffusion.torch2coreml --convert-unet -o <output-mlpackages-directory> && \
-python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder -o <output-mlpackages-directory> && \
-python -m python_coreml_stable_diffusion.torch2coreml --convert-safety-checker -o <output-mlpackages-directory> &&
+python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-encoder --model-version <model-version-string-from-hub> -o <output-mlpackages-directory> && \
+python -m python_coreml_stable_diffusion.torch2coreml --convert-vae-decoder --model-version <model-version-string-from-hub> -o <output-mlpackages-directory> && \
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --model-version <model-version-string-from-hub> -o <output-mlpackages-directory> && \
+python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder --model-version <model-version-string-from-hub> -o <output-mlpackages-directory> && \
+python -m python_coreml_stable_diffusion.torch2coreml --convert-safety-checker --model-version <model-version-string-from-hub> -o <output-mlpackages-directory> &&
 ```
 
 If you need `--chunk-unet`, you may do so in yet another independent command which will reuse the previously exported Unet model and simply chunk it in place:
