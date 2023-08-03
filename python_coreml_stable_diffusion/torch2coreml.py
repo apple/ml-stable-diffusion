@@ -831,11 +831,11 @@ def convert_unet(pipe, args):
         #     # SDXL Refiner Unet does not support FP16 via CLI
         #     compute_precision = ct.precision.FLOAT32
         # else:
-        compute_precision = None
+        #     compute_precision = None
 
         coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
-                                                   ["noise_pred"], args, precision=compute_precision)
+                                                   ["noise_pred"], args)
         del reference_unet
         gc.collect()
 
@@ -1278,8 +1278,6 @@ def main(args):
     logger.info(
         f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
     )
-
-    # if args.xl
 
     # Convert models
     if args.convert_vae_decoder:
