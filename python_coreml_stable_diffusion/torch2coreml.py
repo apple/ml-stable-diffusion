@@ -13,7 +13,7 @@ from copy import deepcopy
 import coremltools as ct
 from diffusers import (
     StableDiffusionPipeline,
-    StableDiffusionXLPipeline,
+    DiffusionPipeline,
     ControlNetModel
 )
 import gc
@@ -568,15 +568,22 @@ def convert_vae_encoder(pipe, args):
     height = (args.latent_h or pipe.unet.config.sample_size) * 8
     width = (args.latent_w or pipe.unet.config.sample_size) * 8
     
-    z_shape = (
+    x_shape = (
         1,  # B
         3,  # C (RGB range from -1 to 1)
         height,  # H
         width,  # w
     )
 
+    if args.xl_version:
+        inputs_dtype = torch.float32
+        compute_precision = ct.precision.FLOAT32
+    else:
+        inputs_dtype = torch.float16
+        compute_precision = None
+
     sample_vae_encoder_inputs = {
-        "z": torch.rand(*z_shape, dtype=torch.float16)
+        "x": torch.rand(*x_shape, dtype=inputs_dtype)
     }
 
     class VAEEncoder(nn.Module):
@@ -588,19 +595,19 @@ def convert_vae_encoder(pipe, args):
             self.quant_conv = pipe.vae.quant_conv.to(dtype=torch.float32)
             self.encoder = pipe.vae.encoder.to(dtype=torch.float32)
 
-        def forward(self, z):
-            return self.quant_conv(self.encoder(z))
+        def forward(self, x):
+            return self.quant_conv(self.encoder(x))
 
     baseline_encoder = VAEEncoder().eval()
 
     # No optimization needed for the VAE Encoder as it is a pure ConvNet
     traced_vae_encoder = torch.jit.trace(
-        baseline_encoder, (sample_vae_encoder_inputs["z"].to(torch.float32), ))
+        baseline_encoder, (sample_vae_encoder_inputs["x"].to(torch.float32), ))
 
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
-        ["latent"], args)
+        ["latent"], args, precision=compute_precision)
 
     # Set model metadata
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
@@ -611,7 +618,7 @@ def convert_vae_encoder(pipe, args):
         "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
-    coreml_vae_encoder.input_description["z"] = \
+    coreml_vae_encoder.input_description["x"] = \
         "The input image to base the initial latents on normalized to range [-1, 1]"
 
     # Set the output descriptions
@@ -624,7 +631,7 @@ def convert_vae_encoder(pipe, args):
     # Parity check PyTorch vs CoreML
     if args.check_output_correctness:
         baseline_out = baseline_encoder(
-            z=sample_vae_encoder_inputs["z"].to(torch.float32)).numpy()
+            x=sample_vae_encoder_inputs["x"].to(torch.float32)).numpy()
         coreml_out = list(
             coreml_vae_encoder.predict(
                 {k: v.numpy()
@@ -673,12 +680,19 @@ def convert_unet(pipe, args):
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
+        
+        if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+            text_token_sequence_length = pipe.text_encoder.config.max_position_embeddings
+            hidden_size = pipe.text_encoder.config.hidden_size,
+        elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+            text_token_sequence_length = pipe.text_encoder_2.config.max_position_embeddings
+            hidden_size = pipe.text_encoder_2.config.hidden_size,
 
         encoder_hidden_states_shape = (
             batch_size,
-            args.text_encoder_hidden_size or pipe.unet.cross_attention_dim or pipe.text_encoder.config.hidden_size,
+            args.text_encoder_hidden_size or pipe.unet.cross_attention_dim or hidden_size,
             1,
-            args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
+            args.text_token_sequence_length or text_token_sequence_length,
         )
 
         # Create the scheduled timesteps for downstream use
@@ -704,11 +718,28 @@ def convert_unet(pipe, args):
             unet_cls = unet.UNet2DConditionModelXL
 
             # Sample time_ids
-            time_ids = torch.tensor([
-                pipe.vae.sample_size, pipe.vae.sample_size, # output_resolution
-                0., 0., # topleft_crop_cond
-                pipe.vae.sample_size, pipe.vae.sample_size # resolution_cond
-            ] * (batch_size)).to(torch.float32)
+            height = (args.latent_h or pipe.unet.config.sample_size) * 8
+            width = (args.latent_w or pipe.unet.config.sample_size) * 8
+
+            original_size = (height, width) # output_resolution
+            crops_coords_top_left = (0, 0) # topleft_crop_cond
+            target_size = (height, width) # resolution_cond
+            if hasattr(pipe, "requires_aesthetics_score") and pipe.config.requires_aesthetics_score:
+                # Part of SDXL's micro-conditioning as explained in section 2.2 of
+                # [https://huggingface.co/papers/2307.01952](https://huggingface.co/papers/2307.01952). Can be used to
+                # simulate an aesthetic score of the generated image by influencing the position and negative text conditions.
+                aesthetic_score = 6.0 # default aesthetic_score
+                negative_aesthetic_score = 2.5 # default negative_aesthetic_score
+                add_time_ids = list(original_size + crops_coords_top_left + (aesthetic_score,))
+                add_neg_time_ids = list(original_size + crops_coords_top_left + (negative_aesthetic_score,))
+            else:
+                add_time_ids = list(original_size + crops_coords_top_left + target_size)
+                add_neg_time_ids = list(original_size + crops_coords_top_left + target_size)
+
+            time_ids = [
+                add_neg_time_ids,
+                add_time_ids
+            ]
 
             # Pooled text embedding from text_encoder_2
             text_embeds_shape = (
@@ -717,7 +748,7 @@ def convert_unet(pipe, args):
             )
 
             additional_xl_inputs = OrderedDict([
-                ("time_ids", time_ids),
+                ("time_ids", torch.tensor(time_ids).to(torch.float32)),
                 ("text_embeds", torch.rand(*text_embeds_shape)),
             ])
 
@@ -796,9 +827,15 @@ def convert_unet(pipe, args):
             for k, v in sample_unet_inputs.items()
         }
 
+        # if args.xl_version and pipe.config.requires_aesthetics_score:
+        #     # SDXL Refiner Unet does not support FP16 via CLI
+        #     compute_precision = ct.precision.FLOAT32
+        # else:
+        compute_precision = None
+
         coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
-                                                   ["noise_pred"], args)
+                                                   ["noise_pred"], args, precision=compute_precision)
         del reference_unet
         gc.collect()
 
@@ -1219,15 +1256,11 @@ def convert_controlnet(pipe, args):
         gc.collect()
 
 def get_pipeline(args):
-    if 'xl' in args.model_version:
-        pipe = StableDiffusionXLPipeline.from_pretrained(args.model_version,
-                                                       torch_dtype=torch.float16,
-                                                       variant="fp16",
-                                                       use_safetensors=True,
-                                                       use_auth_token=True)
-    else:
-        pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
-                                                       use_auth_token=True)
+    pipe = DiffusionPipeline.from_pretrained(args.model_version,
+                                            torch_dtype=torch.float16,
+                                            variant="fp16",
+                                            use_safetensors=True,
+                                            use_auth_token=True)
     return pipe
 
 def main(args):
@@ -1245,6 +1278,8 @@ def main(args):
     logger.info(
         f"Attention implementation in effect: {unet.ATTENTION_IMPLEMENTATION_IN_EFFECT}"
     )
+
+    # if args.xl
 
     # Convert models
     if args.convert_vae_decoder:
@@ -1267,13 +1302,13 @@ def main(args):
         convert_unet(pipe, args)
         logger.info("Converted unet")
 
-    if args.convert_text_encoder:
+    if args.convert_text_encoder and hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
         logger.info("Converting text_encoder")
         convert_text_encoder(pipe.text_encoder, pipe.tokenizer, "text_encoder", args)
         del pipe.text_encoder
         logger.info("Converted text_encoder")
 
-    if args.convert_text_encoder and args.xl_version:
+    if args.convert_text_encoder and hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
         logger.info("Converting text_encoder_2")
         convert_text_encoder(pipe.text_encoder_2, pipe.tokenizer_2, "text_encoder_2", args)
         del pipe.text_encoder_2

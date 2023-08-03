@@ -109,9 +109,14 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
+        // Determine input type of Unet
+        // SDXL Refiner has a latentTimeIdShape of [2, 5]
+        // SDXL Base has either [12] or [2, 6]
+        let isRefiner = unet.latentTimeIdShape.last == 5 ? true : false
+
         // Encode the input prompt and negative prompt
-        let (promptEmbedding, pooled) = try encodePrompt(config.prompt)
-        let (negativePromptEmbedding, negativePooled) = try encodePrompt(config.negativePrompt)
+        let (promptEmbedding, pooled) = try encodePrompt(config.prompt, forRefiner: isRefiner)
+        let (negativePromptEmbedding, negativePooled) = try encodePrompt(config.negativePrompt, forRefiner: isRefiner)
 
         if reduceMemory {
             textEncoder.unloadResources()
@@ -130,18 +135,48 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             concatenating: [negativePooled, pooled],
             alongAxis: 0
         )
-        
-        // TODO: expose these to allow experimentation with different values
-        let geometryCond = MLShapedArray<Float32>(
-            arrayLiteral:
-                1024, 1024, // Original size
-                0, 0,       // Top left crop
-                1024, 1024  // Target size
-        )
-        let geometryConditioning = MLShapedArray<Float32>(
-            concatenating: [geometryCond, geometryCond],
-            alongAxis: 0
-        )
+
+        // Setup geometry conditioning based on base or refiner inputs
+        var geometryConditioning = MLShapedArray<Float32>()
+        if isRefiner {
+            let negativeGeometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.negativeAestheticScore,
+                ],
+                shape: [1, 5]
+            )
+            let positiveGeometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.aestheticScore,
+                ],
+                shape: [1, 5]
+            )
+
+            geometryConditioning = MLShapedArray<Float32>(
+                concatenating: [negativeGeometry, positiveGeometry],
+                alongAxis: 0
+            )
+        } else {
+            let geometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.targetSize, config.targetSize,
+                ],
+                // TODO: This checks if the time_ids input is looking for [12] or [2, 6]
+                // Remove once model input shapes are ubiquitous
+                shape: unet.latentTimeIdShape.count > 1 ? [1, 6] : [6]
+            )
+
+            geometryConditioning = MLShapedArray<Float32>(
+                concatenating: [geometry, geometry],
+                alongAxis: 0
+            )
+        }
 
         /// Setup schedulers
         let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
@@ -167,7 +202,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             let latentUnetInput = latents.map {
                 MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
             }
-                        
+
             // Predict noise residuals from latent samples
             // and current time step conditioned on hidden states
             var noise = try unet.predictNoise(
@@ -222,17 +257,24 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         return try decodeToImages(latents, configuration: config)
     }
 
-    func encodePrompt(_ prompt: String) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
+    func encodePrompt(_ prompt: String, forRefiner: Bool = false) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
         let (embeds1, _) = try textEncoder.encode(prompt)
         let (embeds2, pooled) = try textEncoder2.encode(prompt)
-        
-        // Concatenate embeddings
-        // [1, 77, 768], [1, 77, 1280] -> [1, 77, 2048]
-        let embeds = MLShapedArray<Float32>(
-            concatenating: [embeds1, embeds2],
-            alongAxis: 2
-        )
-        
+
+        var embeds = MLShapedArray<Float32>()
+        if forRefiner {
+            // Refiner only takes textEncoder2 embeddings
+            // [1, 77, 1280]
+            embeds = embeds2
+        } else {
+            // Base needs concatenated embeddings
+            // [1, 77, 768], [1, 77, 1280] -> [1, 77, 2048]
+            embeds = MLShapedArray<Float32>(
+                concatenating: [embeds1, embeds2],
+                alongAxis: 2
+            )
+        }
+
         return (embeds, pooled)
     }
 
