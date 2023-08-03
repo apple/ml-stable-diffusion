@@ -12,7 +12,7 @@ logger.setLevel('INFO')
 
 import numpy as np
 import os
-from python_coreml_stable_diffusion.torch2coreml import compute_psnr, get_pipe
+from python_coreml_stable_diffusion.torch2coreml import compute_psnr, get_pipeline
 import time
 
 import torch
