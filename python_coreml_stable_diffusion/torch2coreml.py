@@ -827,15 +827,15 @@ def convert_unet(pipe, args):
             for k, v in sample_unet_inputs.items()
         }
 
-        # if args.xl_version and pipe.config.requires_aesthetics_score:
-        #     # SDXL Refiner Unet does not support FP16 via CLI
-        #     compute_precision = ct.precision.FLOAT32
-        # else:
-        #     compute_precision = None
+        if args.xl_version and pipe.config.requires_aesthetics_score and args.unet_support_cli:
+            # SDXL Refiner Unet does not support FP16 via CLI
+            compute_precision = ct.precision.FLOAT32
+        else:
+            compute_precision = None
 
         coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
-                                                   ["noise_pred"], args)
+                                                   ["noise_pred"], args, precision=compute_precision)
         del reference_unet
         gc.collect()
 
@@ -1424,6 +1424,13 @@ def parser_spec():
         help=
         "If specified, enable unet to receive additional inputs from controlnet. "
         "Each input added to corresponding resnet output."
+        )
+    parser.add_argument(
+        "--unet-support-cli",
+        action="store_true",
+        help=
+        "If specified, convert the unet with float32 precision. "
+        "This is only necessary if you plan to call the model from StableDiffusionCLI."
         )
 
     # Swift CLI Resource Bundling
