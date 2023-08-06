@@ -194,6 +194,11 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
         pipelineConfig.rngType = rng.stableDiffusionRNG
 
+        if isXL {
+            pipelineConfig.encoderScaleFactor = 0.13025
+            pipelineConfig.decoderScaleFactor = 0.13025
+        }
+
         let images = try pipeline.generateImages(
             configuration: pipelineConfig,
             progressHandler: { progress in
