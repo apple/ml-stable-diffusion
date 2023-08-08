@@ -199,6 +199,11 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.encoderScaleFactor = scaleFactor
         pipelineConfig.decoderScaleFactor = scaleFactor
 
+        if isXL {
+            pipelineConfig.encoderScaleFactor = 0.13025
+            pipelineConfig.decoderScaleFactor = 0.13025
+        }
+
         let images = try pipeline.generateImages(
             configuration: pipelineConfig) { progress in
                 sampleTimer.stop()
