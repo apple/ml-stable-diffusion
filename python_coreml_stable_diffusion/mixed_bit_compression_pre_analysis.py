@@ -125,7 +125,7 @@ def fake_palettize(module, nbits, in_ngroups=1, out_ngroups=1):
 
     dtype = module.weight.data.dtype
     device = module.weight.data.device
-    val = module.weight.data.cpu().numpy().astype(np.float16)
+    val = module.weight.data.cpu().numpy()
     
     if out_ngroups == 1 and in_ngroups == 1:
         lut, indices = compress_kmeans(val=val, nbits=nbits)
@@ -404,7 +404,7 @@ def plot(results, args):
 def main(args):
 
     # Initialize pipe
-    pipe = get_pipe(args.model_version)
+    pipe = get_pipeline(args)
 
     # Preserve a pristine copy for reference outputs
     ref_pipe = deepcopy(pipe)
@@ -533,6 +533,7 @@ if __name__ == "__main__":
         help="Default number of bits to use for palettization",
         choices=tuple(NBITS + [16]),
         default=16,
+        type=int,
     )
     parser.add_argument(
         "--num-recipes",
