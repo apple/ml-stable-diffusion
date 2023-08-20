@@ -690,7 +690,7 @@ def convert_unet(pipe, args):
 
         encoder_hidden_states_shape = (
             batch_size,
-            args.text_encoder_hidden_size or pipe.unet.cross_attention_dim or hidden_size,
+            args.text_encoder_hidden_size or pipe.unet.config.cross_attention_dim or hidden_size,
             1,
             args.text_token_sequence_length or text_token_sequence_length,
         )
@@ -1426,7 +1426,7 @@ def parser_spec():
         "Each input added to corresponding resnet output."
         )
     parser.add_argument(
-        "--unet-support-cli",
+        "--unet-compute-precision-float32",
         action="store_true",
         help=
         "If specified, convert the unet with float32 precision. "
