@@ -242,7 +242,7 @@ Example results using the prompt *"a high quality photo of a surfing dog"* condi
 <details>
   <summary> Details (Click to expand) </summary>
 
-With iOS 17 and macOS 14, `NaturalLanguage` framework introduced the [NLContextualEmbedding](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding) which provides Transformer-based textual embeddings for Latin (20 languages), Cyrillic (4 langauges) and CJK (3 languages) scripts. The WWDC23 session titled [Explore Natural Language multilingual models](https://developer.apple.com/videos/play/wwdc2023/10042) demonstrated how this powerful new model can be used by developers to train downstream tasks such as multilingual image generation with Stable Diffusion.
+With iOS 17 and macOS 14, `NaturalLanguage` framework introduced the [NLContextualEmbedding](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding) which provides Transformer-based textual embeddings for Latin (20 languages), Cyrillic (4 languages) and CJK (3 languages) scripts. The WWDC23 session titled [Explore Natural Language multilingual models](https://developer.apple.com/videos/play/wwdc2023/10042) demonstrated how this powerful new model can be used by developers to train downstream tasks such as multilingual image generation with Stable Diffusion.
 
 The code to reproduce this demo workflow is made available in this repository. There are several ways in which this workflow can be implemented. Here is an example:
 
