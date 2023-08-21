@@ -159,7 +159,7 @@ def fake_palettize(module, nbits, in_ngroups=1, out_ngroups=1):
     else:
         raise ValueError(f"in_ngroups={in_ngroups} & out_ngroups={out_ngroups} is illegal!!!")
     
-    return torch.from_numpy(val)
+    return torch.from_numpy(val).to(dtype)
 
 
 def restore_weight(module, value):
@@ -404,7 +404,7 @@ def plot(results, args):
 def main(args):
 
     # Initialize pipe
-    pipe = get_pipe(args.model_version)
+    pipe = get_pipeline(args)
 
     # Preserve a pristine copy for reference outputs
     ref_pipe = deepcopy(pipe)
@@ -533,6 +533,7 @@ if __name__ == "__main__":
         help="Default number of bits to use for palettization",
         choices=tuple(NBITS + [16]),
         default=16,
+        type=int,
     )
     parser.add_argument(
         "--num-recipes",
