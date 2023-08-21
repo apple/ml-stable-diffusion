@@ -125,7 +125,7 @@ def fake_palettize(module, nbits, in_ngroups=1, out_ngroups=1):
 
     dtype = module.weight.data.dtype
     device = module.weight.data.device
-    val = module.weight.data.cpu().numpy()
+    val = module.weight.data.cpu().numpy().astype(np.float16)
     
     if out_ngroups == 1 and in_ngroups == 1:
         lut, indices = compress_kmeans(val=val, nbits=nbits)
@@ -159,7 +159,7 @@ def fake_palettize(module, nbits, in_ngroups=1, out_ngroups=1):
     else:
         raise ValueError(f"in_ngroups={in_ngroups} & out_ngroups={out_ngroups} is illegal!!!")
     
-    return torch.from_numpy(val)
+    return torch.from_numpy(val).to(dtype)
 
 
 def restore_weight(module, value):
