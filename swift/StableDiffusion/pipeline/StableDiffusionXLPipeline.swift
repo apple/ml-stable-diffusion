@@ -188,6 +188,10 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
 
         // Generate random latent samples from specified seed
         var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+
+        // Store denoised latents from scheduler to pass into decoder
+        var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
+
         if reduceMemory {
             encoder?.unloadResources()
         }
@@ -215,9 +219,6 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
 
             noise = performGuidance(noise, config.guidanceScale)
 
-            // Retrieve denoised latents from scheduler to pass into progress report
-            var denoisedLatents: [MLShapedArray<Float32>] = []
-
             // Have the scheduler compute the previous (t-1) latent
             // sample given the predicted noise and current sample
             for i in 0..<config.imageCount {
@@ -226,10 +227,8 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
                     timeStep: t,
                     sample: latents[i]
                 )
-
-                if let denoisedLatent = scheduler[i].modelOutputs.last {
-                    denoisedLatents.append(denoisedLatent)
-                }
+                
+                denoisedLatents[i] = scheduler[i].modelOutputs.last ?? latents[i]
             }
 
             let currentLatentSamples = config.useDenoisedIntermediates ? denoisedLatents : latents
@@ -254,7 +253,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         }
 
         // Decode the latent samples to images
-        return try decodeToImages(latents, configuration: config)
+        return try decodeToImages(denoisedLatents, configuration: config)
     }
 
     func encodePrompt(_ prompt: String, forRefiner: Bool = false) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
