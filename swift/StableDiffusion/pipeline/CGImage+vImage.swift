@@ -117,11 +117,11 @@ extension CGImage {
                     destBPtr.advanced(by: i).pointee = -1
                 }
             }
-
-            let redData = Data(bytes: destinationR.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-            let greenData = Data(bytes: destinationG.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-            let blueData = Data(bytes: destinationB.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
             
+            let redData = destinationR.unpaddedData()
+            let greenData = destinationG.unpaddedData()
+            let blueData = destinationB.unpaddedData()
+
             let imageData = redData + greenData + blueData
 
             let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.height, self.width])
@@ -130,3 +130,18 @@ extension CGImage {
     }
 }
 
+extension vImage_Buffer {
+    func unpaddedData() -> Data {
+        let bytesPerPixel = self.rowBytes / Int(self.width)
+        let bytesPerRow = Int(self.width) * bytesPerPixel
+
+        var contiguousPixelData = Data(capacity: bytesPerRow * Int(self.height))
+        for row in 0..<Int(self.height) {
+            let rowStart = self.data!.advanced(by: row * self.rowBytes)
+            let rowData = Data(bytes: rowStart, count: bytesPerRow)
+            contiguousPixelData.append(rowData)
+        }
+
+        return contiguousPixelData
+    }
+}
