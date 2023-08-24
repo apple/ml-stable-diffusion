@@ -97,14 +97,6 @@ def _get_out_path(args, submodule_name):
     return os.path.join(args.o, fname)
 
 
-# https://github.com/apple/coremltools/issues/1680
-def _save_mlpackage(model, output_path):
-    # First recreate MLModel object using its in memory spec, then save
-    ct.models.MLModel(model._spec,
-                      weights_dir=model._weights_dir,
-                      is_temp_package=True).save(output_path)
-
-
 def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
                        output_names, args, out_path=None, precision=None):
 
@@ -382,7 +374,7 @@ def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     coreml_text_encoder.output_description[
         "pooled_outputs"] = "The version of the `last_hidden_state` output after pooling"
 
-    _save_mlpackage(coreml_text_encoder, out_path)
+    coreml_text_encoder.save(out_path)
 
     logger.info(f"Saved text_encoder into {out_path}")
 
@@ -531,7 +523,7 @@ def convert_vae_decoder(pipe, args):
     coreml_vae_decoder.output_description[
         "image"] = "Generated image normalized to range [-1, 1]"
 
-    _save_mlpackage(coreml_vae_decoder, out_path)
+    coreml_vae_decoder.save(out_path)
 
     logger.info(f"Saved vae_decoder into {out_path}")
 
@@ -617,7 +609,7 @@ def convert_vae_encoder(pipe, args):
     # Set the output descriptions
     coreml_vae_encoder.output_description["latent"] = "The latent embeddings from the unet model from the input image."
 
-    _save_mlpackage(coreml_vae_encoder, out_path)
+    coreml_vae_encoder.save(out_path)
 
     logger.info(f"Saved vae_encoder into {out_path}")
 
@@ -829,7 +821,7 @@ def convert_unet(pipe, args):
         from python_coreml_stable_diffusion._version import __version__
         coreml_unet.user_defined_metadata["com.github.apple.ml-stable-diffusion.version"] = __version__
 
-        _save_mlpackage(coreml_unet, out_path)
+        coreml_unet.save(out_path)
         logger.info(f"Saved unet into {out_path}")
 
         # Parity check PyTorch vs CoreML
@@ -1031,7 +1023,7 @@ def convert_safety_checker(pipe, args):
         "Concept scores are the scores before thresholding at zero yields the `has_nsfw_concepts` output. " \
         "These scores can be used to tune the `adjustment` input"
 
-    _save_mlpackage(coreml_safety_checker, out_path)
+    coreml_safety_checker.save(out_path)
 
     if args.check_output_correctness:
         baseline_out = pipe.safety_checker(
@@ -1203,7 +1195,7 @@ def convert_controlnet(pipe, args):
                 "One of the outputs of each downsampling block in ControlNet. " \
                 "The value added to the corresponding resnet output in UNet."
 
-        _save_mlpackage(coreml_controlnet, out_path)
+        coreml_controlnet.save(out_path)
         logger.info(f"Saved controlnet into {out_path}")
 
         # Parity check PyTorch vs CoreML
