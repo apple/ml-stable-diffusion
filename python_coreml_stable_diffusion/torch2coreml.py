@@ -150,7 +150,7 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
 def quantize_weights(args):
     """ Quantize weights to args.quantize_nbits using a palette (look-up table)
     """
-    for model_name in ["text_encoder", "text_encoder_2", "unet", "control-unet"]:
+    for model_name in ["text_encoder", "text_encoder_2", "unet", "refiner", "control-unet"]:
         logger.info(f"Quantizing {model_name} to {args.quantize_nbits}-bit precision")
         out_path = _get_out_path(args, model_name)
         _quantize_weights(
@@ -232,6 +232,7 @@ def bundle_resources_for_swift_cli(args):
                                      ("vae_decoder", "VAEDecoder"),
                                      ("vae_encoder", "VAEEncoder"),
                                      ("unet", "Unet"),
+                                     ("refiner", "UnetRefiner"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
                                      ("control-unet", "ControlledUnet"),
@@ -643,13 +644,13 @@ def convert_vae_encoder(pipe, args):
     gc.collect()
 
 
-def convert_unet(pipe, args):
+def convert_unet(pipe, args, model_name = None):
     """ Converts the UNet component of Stable Diffusion
     """
     if args.unet_support_controlnet:
         unet_name = "control-unet"
     else:
-        unet_name = "unet"
+        unet_name = model_name or "unet"
 
     out_path = _get_out_path(args, unet_name)
 
@@ -827,15 +828,10 @@ def convert_unet(pipe, args):
             for k, v in sample_unet_inputs.items()
         }
 
-        if args.xl_version and pipe.config.requires_aesthetics_score and args.unet_support_cli:
-            # SDXL Refiner Unet does not support FP16 via CLI
-            compute_precision = ct.precision.FLOAT32
-        else:
-            compute_precision = None
 
         coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
-                                                   ["noise_pred"], args, precision=compute_precision)
+                                                   ["noise_pred"], args)
         del reference_unet
         gc.collect()
 
@@ -1255,8 +1251,8 @@ def convert_controlnet(pipe, args):
         del coreml_controlnet
         gc.collect()
 
-def get_pipeline(args):
-    pipe = DiffusionPipeline.from_pretrained(args.model_version,
+def get_pipeline(model_version):
+    pipe = DiffusionPipeline.from_pretrained(model_version,
                                             torch_dtype=torch.float16,
                                             variant="fp16",
                                             use_safetensors=True,
@@ -1269,7 +1265,7 @@ def main(args):
     # Instantiate diffusers pipe as reference
     logger.info(
         f"Initializing StableDiffusionPipeline with {args.model_version}..")
-    pipe = get_pipeline(args)
+    pipe = get_pipeline(args.model_version)
     logger.info("Done.")
 
     # Register the selected attention implementation globally
@@ -1317,6 +1313,14 @@ def main(args):
         convert_safety_checker(pipe, args)
         logger.info("Converted safety_checker")
 
+    if args.convert_unet and args.refiner_version is not None:
+        logger.info(f"Converting refiner")
+        del pipe
+        pipe = get_pipeline(args.refiner_version)
+        convert_unet(pipe, args, model_name="refiner")
+        del pipe
+        logger.info(f"Converted refiner")
+
     if args.quantize_nbits is not None:
         logger.info(f"Quantizing weights to {args.quantize_nbits}-bit precision")
         quantize_weights(args)
@@ -1352,11 +1356,19 @@ def parser_spec():
         ("The pre-trained model checkpoint and configuration to restore. "
          "For available versions: https://huggingface.co/models?search=stable-diffusion"
          ))
+    parser.add_argument(
+        "--refiner-version",
+        default=None,
+        help=
+        ("The pre-trained refiner model checkpoint and configuration to restore. "
+         "If specified, this argument will convert and bundle the refiner unet only alongside the model unet. "
+         "If you would like to convert a refiner model on it's own, use the --model-version argument instead."
+         "For available versions: https://huggingface.co/models?sort=trending&search=stable-diffusion+refiner"
+         ))
     parser.add_argument("--compute-unit",
                         choices=tuple(cu
                                       for cu in ct.ComputeUnit._member_names_),
                         default="ALL")
-
     parser.add_argument(
         "--latent-h",
         type=int,
@@ -1424,13 +1436,6 @@ def parser_spec():
         help=
         "If specified, enable unet to receive additional inputs from controlnet. "
         "Each input added to corresponding resnet output."
-        )
-    parser.add_argument(
-        "--unet-compute-precision-float32",
-        action="store_true",
-        help=
-        "If specified, convert the unet with float32 precision. "
-        "This is only necessary if you plan to call the model from StableDiffusionCLI."
         )
 
     # Swift CLI Resource Bundling
