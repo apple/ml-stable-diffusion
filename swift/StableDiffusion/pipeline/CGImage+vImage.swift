@@ -63,7 +63,7 @@ extension CGImage {
         return cgImage
     }
     
-    public func plannerRGBShapedArray(minValue: Float, maxValue: Float)
+    public func planarRGBShapedArray(minValue: Float, maxValue: Float)
         throws -> MLShapedArray<Float32> {
             guard
                 var sourceFormat = vImage_CGImageFormat(cgImage: self),
@@ -80,7 +80,7 @@ extension CGImage {
             
             var sourceImageBuffer = try vImage_Buffer(cgImage: self)
             
-            var mediumDesination = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: mediumFormat.bitsPerPixel)
+            var mediumDestination = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: mediumFormat.bitsPerPixel)
             
             let converter = vImageConverter_CreateWithCGImageFormat(
                 &sourceFormat,
@@ -93,7 +93,7 @@ extension CGImage {
                 throw ShapedArrayError.vImageConverterNotInitialized
             }
             
-            vImageConvert_AnyToAny(converter, &sourceImageBuffer, &mediumDesination, nil, vImage_Flags(kvImagePrintDiagnosticsToConsole))
+            vImageConvert_AnyToAny(converter, &sourceImageBuffer, &mediumDestination, nil, vImage_Flags(kvImagePrintDiagnosticsToConsole))
             
             var destinationA = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
             var destinationR = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
@@ -103,7 +103,7 @@ extension CGImage {
             var minFloat: [Float] = Array(repeating: minValue, count: 4)
             var maxFloat: [Float] = Array(repeating: maxValue, count: 4)
             
-            vImageConvert_ARGB8888toPlanarF(&mediumDesination, &destinationA, &destinationR, &destinationG, &destinationB, &maxFloat, &minFloat, .zero)
+            vImageConvert_ARGB8888toPlanarF(&mediumDestination, &destinationA, &destinationR, &destinationG, &destinationB, &maxFloat, &minFloat, .zero)
            
             let destAPtr = destinationA.data.assumingMemoryBound(to: Float.self)
             let destRPtr = destinationR.data.assumingMemoryBound(to: Float.self)
@@ -117,11 +117,11 @@ extension CGImage {
                     destBPtr.advanced(by: i).pointee = -1
                 }
             }
-
-            let redData = Data(bytes: destinationR.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-            let greenData = Data(bytes: destinationG.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
-            let blueData = Data(bytes: destinationB.data, count: Int(width) * Int(height) * MemoryLayout<Float>.size)
             
+            let redData = destinationR.unpaddedData()
+            let greenData = destinationG.unpaddedData()
+            let blueData = destinationB.unpaddedData()
+
             let imageData = redData + greenData + blueData
 
             let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.height, self.width])
@@ -130,3 +130,18 @@ extension CGImage {
     }
 }
 
+extension vImage_Buffer {
+    func unpaddedData() -> Data {
+        let bytesPerPixel = self.rowBytes / Int(self.width)
+        let bytesPerRow = Int(self.width) * bytesPerPixel
+
+        var contiguousPixelData = Data(capacity: bytesPerRow * Int(self.height))
+        for row in 0..<Int(self.height) {
+            let rowStart = self.data!.advanced(by: row * self.rowBytes)
+            let rowData = Data(bytes: rowStart, count: bytesPerRow)
+            contiguousPixelData.append(rowData)
+        }
+
+        return contiguousPixelData
+    }
+}
