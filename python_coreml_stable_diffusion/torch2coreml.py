@@ -127,13 +127,12 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
             outputs=[ct.TensorType(name=name) for name in output_names],
             compute_units=ct.ComputeUnit[args.compute_unit],
             compute_precision=precision,
-            # skip_model_load=True,
+            skip_model_load=args.check_output_correctness,
         )
 
         del torchscript_module
         gc.collect()
 
-        coreml_model.save(out_path)
         logger.info(f"Saved {submodule_name} model to {out_path}")
 
     return coreml_model, out_path
@@ -707,10 +706,10 @@ def convert_unet(pipe, args, model_name = None):
             original_size = (height, width) # output_resolution
             crops_coords_top_left = (0, 0) # topleft_crop_cond
             target_size = (height, width) # resolution_cond
-            if hasattr(pipe, "requires_aesthetics_score") and pipe.config.requires_aesthetics_score:
+            if hasattr(pipe.config, "requires_aesthetics_score") and pipe.config.requires_aesthetics_score:
                 # Part of SDXL's micro-conditioning as explained in section 2.2 of
                 # [https://huggingface.co/papers/2307.01952](https://huggingface.co/papers/2307.01952). Can be used to
-                # simulate an aesthetic score of the generated image by influencing the position and negative text conditions.
+                # simulate an aesthetic score of the generated image by influencing the positive and negative text conditions.
                 aesthetic_score = 6.0 # default aesthetic_score
                 negative_aesthetic_score = 2.5 # default negative_aesthetic_score
                 add_time_ids = list(original_size + crops_coords_top_left + (aesthetic_score,))
@@ -834,6 +833,10 @@ def convert_unet(pipe, args, model_name = None):
             "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
             "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
             "Shorter text does not reduce computation."
+        coreml_unet.input_description["time_ids"] = \
+            "Additional embeddings that if specified are added to the embeddings that are passed along to the UNet blocks."
+        coreml_unet.input_description["text_embeds"] = \
+            "Additional embeddings from text_encoder_2 that if specified are added to the embeddings that are passed along to the UNet blocks."
 
         # Set the output descriptions
         coreml_unet.output_description["noise_pred"] = \
@@ -1298,9 +1301,11 @@ def main(args):
     if args.convert_unet and args.refiner_version is not None:
         logger.info(f"Converting refiner")
         del pipe
+        gc.collect()
         pipe = get_pipeline(args.refiner_version)
         convert_unet(pipe, args, model_name="refiner")
         del pipe
+        gc.collect()
         logger.info(f"Converted refiner")
 
     if args.quantize_nbits is not None:
