@@ -127,7 +127,7 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
             outputs=[ct.TensorType(name=name) for name in output_names],
             compute_units=ct.ComputeUnit[args.compute_unit],
             compute_precision=precision,
-            skip_model_load=args.check_output_correctness,
+            skip_model_load=not args.check_output_correctness,
         )
 
         del torchscript_module
