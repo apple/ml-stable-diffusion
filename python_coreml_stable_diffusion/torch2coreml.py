@@ -133,8 +133,6 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
         del torchscript_module
         gc.collect()
 
-        logger.info(f"Saved {submodule_name} model to {out_path}")
-
     return coreml_model, out_path
 
 
@@ -324,7 +322,7 @@ def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     hidden_layer = -2 if args.xl_version else None
     reference_text_encoder = TextEncoder(with_hidden_states_for_layer=hidden_layer).eval()
 
-    logger.info("JIT tracing text_encoder..")
+    logger.info(f"JIT tracing {submodule_name}..")
     reference_text_encoder = torch.jit.trace(
         reference_text_encoder,
         (sample_text_encoder_inputs["input_ids"].to(torch.int32), ),
@@ -499,7 +497,10 @@ def convert_vae_decoder(pipe, args):
 
     # Set model metadata
     coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+    if args.xl_version:
+        coreml_vae_decoder.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+    else:
+        coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_decoder.version = args.model_version
     coreml_vae_decoder.short_description = \
         "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
@@ -593,7 +594,10 @@ def convert_vae_encoder(pipe, args):
 
     # Set model metadata
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+    if args.xl_version:
+        coreml_vae_encoder.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+    else:
+        coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_encoder.version = args.model_version
     coreml_vae_encoder.short_description = \
         "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
@@ -818,8 +822,11 @@ def convert_unet(pipe, args, model_name = None):
 
         # Set model metadata
         coreml_unet.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-        coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
-        coreml_unet.version = args.model_version
+        if args.xl_version:
+            coreml_unet.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+        else:
+            coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_unet.version = args.model_version if model_name != "refiner" or not hasattr(args, "refiner_version") else args.refiner_version
         coreml_unet.short_description = \
             "Stable Diffusion generates images conditioned on text or other images as input through the diffusion process. " \
             "Please refer to https://arxiv.org/abs/2112.10752 for details."
