@@ -69,6 +69,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         norm_num_groups=32,
         norm_eps=1e-5,
         cross_attention_dim=1280,
+        transformer_layers_per_block=1,
         attention_head_dim=8,
         use_linear_projection=False,
         upcast_attention=False,
@@ -129,6 +130,9 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         if isinstance(attention_head_dim, int):
             attention_head_dim = (attention_head_dim,) * len(down_block_types)
 
+        if isinstance(transformer_layers_per_block, int):
+            transformer_layers_per_block = [transformer_layers_per_block] * len(down_block_types)
+
         # down
         output_channel = block_out_channels[0]
 
@@ -142,6 +146,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
             down_block = get_down_block(
                 down_block_type,
+                transformer_layers_per_block=transformer_layers_per_block[i],
                 num_layers=layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
@@ -151,6 +156,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
                 cross_attention_dim=cross_attention_dim,
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=downsample_padding,
+                add_downsample=not is_final_block,
             )
             self.down_blocks.append(down_block)
 
