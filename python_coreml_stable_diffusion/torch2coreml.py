@@ -272,6 +272,24 @@ def bundle_resources_for_swift_cli(args):
     return resources_dir
 
 
+from transformers.models.clip import modeling_clip
+
+# Copied from https://github.com/huggingface/transformers/blob/v4.30.0/src/transformers/models/clip/modeling_clip.py#L677C1-L692C1
+def patched_make_causal_mask(input_ids_shape, dtype, device, past_key_values_length: int = 0):
+    """ Patch to replace torch.finfo(dtype).min with -1e4
+    """
+    bsz, tgt_len = input_ids_shape
+    mask = torch.full((tgt_len, tgt_len), torch.tensor(-1e4, device=device), device=device)
+    mask_cond = torch.arange(mask.size(-1), device=device)
+    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+    mask = mask.to(dtype)
+
+    if past_key_values_length > 0:
+        mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
+    return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
+
+modeling_clip._make_causal_mask = patched_make_causal_mask
+
 def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     """ Converts the text encoder component of Stable Diffusion
     """
