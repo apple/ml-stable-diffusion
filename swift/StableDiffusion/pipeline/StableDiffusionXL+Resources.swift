@@ -15,6 +15,7 @@ public extension StableDiffusionXLPipeline {
         public let unetURL: URL
         public let unetChunk1URL: URL
         public let unetChunk2URL: URL
+        public let unetRefinerURL: URL
         public let decoderURL: URL
         public let encoderURL: URL
         public let vocabURL: URL
@@ -26,6 +27,7 @@ public extension StableDiffusionXLPipeline {
             unetURL = baseURL.appending(path: "Unet.mlmodelc")
             unetChunk1URL = baseURL.appending(path: "UnetChunk1.mlmodelc")
             unetChunk2URL = baseURL.appending(path: "UnetChunk2.mlmodelc")
+            unetRefinerURL = baseURL.appending(path: "UnetRefiner.mlmodelc")
             decoderURL = baseURL.appending(path: "VAEDecoder.mlmodelc")
             encoderURL = baseURL.appending(path: "VAEEncoder.mlmodelc")
             vocabURL = baseURL.appending(path: "vocab.json")
@@ -51,7 +53,12 @@ public extension StableDiffusionXLPipeline {
         /// Expect URL of each resource
         let urls = ResourceURLs(resourcesAt: baseURL)
         let tokenizer = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL)
-        let textEncoder = TextEncoderXL(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+        let textEncoder: TextEncoderXL?
+        if FileManager.default.fileExists(atPath: urls.textEncoderURL.path) {
+            textEncoder = TextEncoderXL(tokenizer: tokenizer, modelAt: urls.textEncoderURL, configuration: config)
+        } else {
+            textEncoder = nil
+        }
         
         // padToken is different in the second XL text encoder
         let tokenizer2 = try BPETokenizer(mergesAt: urls.mergesURL, vocabularyAt: urls.vocabURL, padToken: "!")
@@ -66,6 +73,15 @@ public extension StableDiffusionXLPipeline {
         } else {
             unet = Unet(modelAt: urls.unetURL, configuration: config)
         }
+
+        // Refiner Unet model
+        let unetRefiner: Unet?
+        if FileManager.default.fileExists(atPath: urls.unetRefinerURL.path) {
+            unetRefiner = Unet(modelAt: urls.unetRefinerURL, configuration: config)
+        } else {
+            unetRefiner = nil
+        }
+
 
         // Image Decoder
         let decoder = Decoder(modelAt: urls.decoderURL, configuration: config)
@@ -83,6 +99,7 @@ public extension StableDiffusionXLPipeline {
             textEncoder: textEncoder,
             textEncoder2: textEncoder2,
             unet: unet,
+            unetRefiner: unetRefiner,
             decoder: decoder,
             encoder: encoder,
             reduceMemory: reduceMemory

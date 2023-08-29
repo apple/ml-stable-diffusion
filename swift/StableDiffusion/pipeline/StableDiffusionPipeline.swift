@@ -24,7 +24,9 @@ public enum StableDiffusionRNG {
 }
 
 public enum PipelineError: String, Swift.Error {
+    case missingUnetInputs
     case startingImageProvidedWithoutEncoder
+    case startingText2ImgWithoutTextEncoder
     case unsupportedOSVersion
 }
 
