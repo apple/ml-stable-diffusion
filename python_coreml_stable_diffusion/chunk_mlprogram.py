@@ -105,7 +105,10 @@ def _get_op_idx_split_location(prog: Program):
             size_in_mb = op.val.val.size * op.val.val.itemsize / (1024 * 1024)
             cumulative_size_in_mb += size_in_mb
 
-        if (cumulative_size_in_mb > half_size and op.op_type != "const"
+        # Note: The condition "not op.op_type.startswith("const")" is to make sure that the
+        # incision op is neither of type "const" nor "constexpr_*" ops that
+        # are used to store compressed weights
+        if (cumulative_size_in_mb > half_size and not op.op_type.startswith("const")
                 and len(op.outputs) == 1
                 and len(op.outputs[0].child_ops) == 1):
             op_idx = main_block.operations.index(op)
@@ -192,6 +195,11 @@ def _make_second_chunk_prog(prog, op_idx):
                 anchor_op=boundary_op,
                 old_var=var,
                 new_var=new_var,
+                # This is needed if the program contains "constexpr_*" ops. In normal cases, there are stricter
+                # rules for removing them, and their presence may prevent replacing this var.
+                # However in this case, since we want to remove all the ops in chunk 1, we can safely
+                # set this to True.
+                force_replace=True,
             )
 
     PASS_REGISTRY["common::dead_code_elimination"](prog)
