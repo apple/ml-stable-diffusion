@@ -55,24 +55,22 @@ Target Device Hardware Generation:
 
 |        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
 | --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
-| iPhone 12 Mini        | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      20                |        1.3               |
-| iPhone 12 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      17                |        1.4               |
-| iPhone 13             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      15                |        1.7               |
-| iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      12                |        1.8               |
-| iPhone 14             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      13                |        1.8               |
-| iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      9                 |        2.3               |
-| iPad Pro (M1)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      11                |        2.1               |
-| iPad Pro (M2)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      8                 |        2.9               |
-| Mac Studio (M1 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      4                 |        6.3               |
-| Mac Studio (M2 Ultra) | `CPU_AND_GPU`   |      `ORIGINAL`              |      3                 |        7.6               |
+| iPhone 12 Mini        | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      18.5              |        1.44              |
+| iPhone 12 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      15.4              |        1.45              |
+| iPhone 13             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      10.8              |        2.53              |
+| iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      10.4              |        2.55              |
+| iPhone 14             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      8.6               |        2.57              |
+| iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      7.9               |        2.69              |
+| iPad Pro (M1)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      11.2              |        2.19              |
+| iPad Pro (M2)         | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      7.0               |        3.07              |
 
 <details>
   <summary> Details (Click to expand) </summary>
 
-- This benchmark was conducted by Apple using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 in June 2023.
+- This benchmark was conducted by Apple using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 Seed 8 in August 2023.
 - The performance data was collected by running the `StableDiffusion` Swift pipeline.
 - Swift code is not fully optimized, introducing up to ~10% overhead unrelated to Core ML model execution.
-- The median latency value across 3 back-to-back end-to-end executions are reported
+- The median latency value across 5 back-to-back end-to-end executions are reported
 - The image generation procedure follows the standard configuration: 20 inference steps, 512x512 output image resolution, 77 text token sequence length, classifier-free guidance (batch size of 2 for unet).
 - The actual prompt length does not impact performance because the Core ML model is converted with a static shape that computes the forward pass for all of the 77 elements (`tokenizer.model_max_length`) in the text token sequence regardless of the actual length of the input text.
 - Weights are compressed to 6 bit precision. Please refer to [this section](#compression) for details.
@@ -81,7 +79,7 @@ Target Device Hardware Generation:
 - In the benchmark table, we report the best performing `--compute-unit` and `--attention-implementation` values per device. The former does not modify the Core ML model and can be applied during runtime. The latter modifies the Core ML model. Note that the best performing compute unit is model version and hardware-specific.
 - Note that the performance optimizations in this repository (e.g. `--attention-implementation`) are generally applicable to Transformers and not customized to Stable Diffusion. Better performance may be observed upon custom kernel tuning. Therefore, these numbers do not represent **peak** HW capability.
 - Performance may vary across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
-- Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state. Given these factors, we do not report sub-second variance in latency.
+- Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state.
 
 </details>
 
@@ -109,6 +107,9 @@ Target Device Hardware Generation:
 
 ## <a name="compression"></a> Weight Compression
 
+<details>
+  <summary> Details (Click to expand) </summary>
+
 coremltools-7.0 supports advanced weight compression techniques for [pruning](https://coremltools.readme.io/v7.0/docs/pruning), [palettization](https://coremltools.readme.io/v7.0/docs/palettization-overview) and [linear 8-bit quantization](https://coremltools.readme.io/v7.0/docs/quantization-aware-training). For these techniques, `coremltools.optimize.torch.*` includes APIs that require fine-tuning to maintain accuracy at higher compression rates whereas `coremltools.optimize.coreml.*` includes APIs that are applied post-training and are data-free.
 
 We demonstrate how data-free [post-training palettization](https://coremltools.readme.io/v7.0/docs/post-training-palettization) implemented in `coremltools.optimize.coreml.palettize_weights` enables us to achieve greatly improved performance for Stable Diffusion on mobile devices. This API implements the [Fast Exact k-Means](https://arxiv.org/abs/1701.07204) algorithm for optimal weight clustering which yields more accurate palettes. Using `--quantize-nbits {2,4,6,8}` during [conversion](#converting-models-to-coreml) is going to apply this compression to the unet and text_encoder models.
@@ -128,6 +129,8 @@ Note that there are minor differences across 16-bit (float16) and 6-bit results.
 Resources:
 - [Core ML Tools Docs: Optimizing Models](https://coremltools.readme.io/v7.0/docs/optimizing-models)
 - [WWDC23 Session Video: Use Core ML Tools for machine learning model compression](https://developer.apple.com/videos/play/wwdc2023/10047)
+
+</details>
 
 ## <a name="mbp"></a> MBP: Post-Training Mixed-Bit Palettization
 
