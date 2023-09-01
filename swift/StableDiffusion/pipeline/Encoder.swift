@@ -63,7 +63,7 @@ public struct Encoder: ResourceManaging {
         }
         let outputName = result.featureNames.first!
         let outputValue = result.featureValue(for: outputName)!.multiArrayValue!
-        let output = MLShapedArray<Float32>(outputValue)
+        let output = MLShapedArray<Float32>(converting: outputValue)
         
         // DiagonalGaussianDistribution
         let mean = output[0][0..<4]
