@@ -20,8 +20,14 @@ public struct PipelineConfiguration: Hashable {
     public var negativePrompt: String = ""
     /// Starting image for image2image or in-painting
     public var startingImage: CGImage? = nil
-    //public var maskImage: CGImage? = nil
+    /// Fraction of inference steps to be used in `.imageToImage` pipeline mode
+    /// Must be between 0 and 1
+    /// Higher values will result in greater transformation of the `startingImage`
     public var strength: Float = 1.0
+    /// Fraction of inference steps to at which to start using the refiner unet if present in `textToImage` mode
+    /// Must be between 0 and 1
+    /// Higher values will result in fewer refiner steps
+    public var refinerStart: Float = 0.7
     /// Number of images to generate
     public var imageCount: Int = 1
     /// Number of inference steps to perform

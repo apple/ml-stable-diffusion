@@ -201,8 +201,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
 
         // Calculate which step to swap to refiner
-        let refinerFraction: Float = config.strength
-        let refinerStart = Int(Float(timeSteps.count) * refinerFraction)
+        let refinerStartStep = Int(Float(timeSteps.count) * config.refinerStart)
 
         // De-noising loop
         for (step,t) in timeSteps.enumerated() {
@@ -213,12 +212,10 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             }
 
             // Switch to refiner if specified
-            if unetRefiner != nil, step == refinerStart {
-                if reduceMemory {
-                    self.unet.unloadResources()
-                }
+            if let refiner = unetRefiner, step == refinerStartStep {
+                self.unet.unloadResources()
 
-                unetModel = unetRefiner!
+                unetModel = refiner
                 currentInput = refinerInput
                 unetHiddenStates = currentInput?.hiddenStates
                 unetPooledStates = currentInput?.pooledStates
