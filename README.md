@@ -206,10 +206,11 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 e.g.:
 
 ```bash
-python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-vae-decoder --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-vae-decoder --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --refiner-version stabilityai/stable-diffusion-xl-refiner-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
 ```
 
 - `--xl-version`: Additional argument to pass to the conversion script when specifying an XL model
+- `--refiner-version`: Additional argument to pass to the conversion script when specifying an XL refiner model, required for ["Ensemble of Expert Denoisers"](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/stable_diffusion_xl#1-ensemble-of-expert-denoisers) inference.
 - `--attention-implementation ORIGINAL` (recommended for `cpuAndGPU`)
 - Due to known float16 overflow issues in the VAE, it runs in float32 precision for now
 
@@ -222,7 +223,7 @@ swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-dire
 ```
 
 - Only `--compute-units cpuAndGPU` is supported for now
-- Only the `base` model is supported, `refiner` model is not yet supported
+- Only the `base` model is required, `refiner` model is optional and will be used by default if provided in the resource directory
 - ControlNet for XL is not yet supported
 
 
@@ -362,6 +363,7 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--model-version`: The model version name as published on the [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion)
 
+- `--refiner-version`: The refiner version name as published on the [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion). This is optional and if specified, this argument will convert and bundle the refiner unet alongside the model unet.
 
 - `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline.
 
@@ -436,7 +438,7 @@ This Swift package contains two products:
 
 Both of these products require the Core ML models and tokenization resources to be supplied. When specifying resources via a directory path that directory must contain the following:
 
-- `TextEncoder.mlmodelc` (text embedding model)
+- `TextEncoder.mlmodelc` or `TextEncoder2.mlmodelc (text embedding model)
 - `Unet.mlmodelc` or `UnetChunk1.mlmodelc` & `UnetChunk2.mlmodelc` (denoising autoencoder model)
 - `VAEDecoder.mlmodelc` (image decoder model)
 - `vocab.json` (tokenizer vocabulary file)
@@ -449,6 +451,10 @@ Optionally, for image2image, in-painting, or similar:
 Optionally, it may also include the safety checker model that some versions of Stable Diffusion include:
 
 - `SafetyChecker.mlmodelc`
+
+Optionally, for the SDXL refiner:
+
+- `UnetRefiner.mlmodelc` (refiner unet model) 
 
 Optionally, for ControlNet:
 
