@@ -64,7 +64,7 @@ public struct Decoder: ResourceManaging {
             let result = results.features(at: i)
             let outputName = result.featureNames.first!
             let output = result.featureValue(for: outputName)!.multiArrayValue!
-            return try CGImage.fromShapedArray(MLShapedArray<Float32>(output))
+            return try CGImage.fromShapedArray(MLShapedArray<Float32>(converting: output))
         }
 
         return images
