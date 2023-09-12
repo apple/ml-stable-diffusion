@@ -858,10 +858,11 @@ def convert_unet(pipe, args, model_name = None):
             "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
             "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
             "Shorter text does not reduce computation."
-        coreml_unet.input_description["time_ids"] = \
-            "Additional embeddings that if specified are added to the embeddings that are passed along to the UNet blocks."
-        coreml_unet.input_description["text_embeds"] = \
-            "Additional embeddings from text_encoder_2 that if specified are added to the embeddings that are passed along to the UNet blocks."
+        if args.xl_version:
+            coreml_unet.input_description["time_ids"] = \
+                "Additional embeddings that if specified are added to the embeddings that are passed along to the UNet blocks."
+            coreml_unet.input_description["text_embeds"] = \
+                "Additional embeddings from text_encoder_2 that if specified are added to the embeddings that are passed along to the UNet blocks."
 
         # Set the output descriptions
         coreml_unet.output_description["noise_pred"] = \
