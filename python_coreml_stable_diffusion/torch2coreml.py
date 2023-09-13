@@ -1262,22 +1262,23 @@ def convert_controlnet(pipe, args):
         del coreml_controlnet
         gc.collect()
 
-def get_pipeline(model_version):
+def get_pipeline(args):
+    model_version = args.model_version
+
+    logger.info(f"Initializing DiffusionPipeline with {model_version}..")
     pipe = DiffusionPipeline.from_pretrained(model_version,
                                             torch_dtype=torch.float16,
                                             variant="fp16",
                                             use_safetensors=True,
                                             use_auth_token=True)
+    logger.info(f"Done. Pipeline in effect: {pipe.__class__.__name__}")
     return pipe
 
 def main(args):
     os.makedirs(args.o, exist_ok=True)
 
     # Instantiate diffusers pipe as reference
-    logger.info(
-        f"Initializing StableDiffusionPipeline with {args.model_version}..")
-    pipe = get_pipeline(args.model_version)
-    logger.info("Done.")
+    pipe = get_pipeline(args)
 
     # Register the selected attention implementation globally
     unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
@@ -1328,7 +1329,8 @@ def main(args):
         logger.info(f"Converting refiner")
         del pipe
         gc.collect()
-        pipe = get_pipeline(args.refiner_version)
+        args.model_version = args.refiner_version
+        pipe = get_pipeline(args)
         convert_unet(pipe, args, model_name="refiner")
         del pipe
         gc.collect()
