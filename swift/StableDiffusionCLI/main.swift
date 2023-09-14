@@ -74,7 +74,7 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
     var scheduler: SchedulerOption = .pndm
 
-    @Option(help: "Random number generator to use, one of {numpy, torch}")
+    @Option(help: "Random number generator to use, one of {numpy, torch, nvidia}")
     var rng: RNGOption = .numpy
     
     @Option(
@@ -336,11 +336,12 @@ enum SchedulerOption: String, ExpressibleByArgument {
 
 @available(iOS 16.2, macOS 13.1, *)
 enum RNGOption: String, ExpressibleByArgument {
-    case numpy, torch
+    case numpy, torch, nvidia
     var stableDiffusionRNG: StableDiffusionRNG {
         switch self {
         case .numpy: return .numpyRNG
         case .torch: return .torchRNG
+        case .nvidia: return .nvidiaRNG
         }
     }
 }
