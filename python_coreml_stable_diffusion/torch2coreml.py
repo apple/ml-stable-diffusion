@@ -1332,11 +1332,11 @@ def main(args):
         original_model_version = args.model_version
         args.model_version = args.refiner_version
         pipe = get_pipeline(args)
+        args.model_version = original_model_version 
         convert_unet(pipe, args, model_name="refiner")
         del pipe
         gc.collect()
         logger.info(f"Converted refiner")
-        args.model_version = original_model_version 
 
     if args.quantize_nbits is not None:
         logger.info(f"Quantizing weights to {args.quantize_nbits}-bit precision")
