@@ -66,7 +66,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         self.unetRefiner = unetRefiner
         self.decoder = decoder
         self.encoder = encoder
-        self.reduceMemory = reduceMemory
+        self.reduceMemory = true
     }
 
     /// Load required resources for this pipeline
@@ -87,8 +87,9 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
                 print("Error loading resources for textEncoder: \(error)")
             }
 
+            // Only prewarm refiner unet on load so it's unloaded until needed
             do {
-                try unetRefiner?.loadResources()
+                try unetRefiner?.prewarmResources()
             } catch {
                 print("Error loading resources for unetRefiner: \(error)")
             }
@@ -191,7 +192,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
 
         // Store current model
-        var unetModel = self.unet
+        var unetModel = unet
         var currentInput = baseInput ?? refinerInput
 
         var unetHiddenStates = currentInput?.hiddenStates
@@ -269,10 +270,12 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             }
         }
 
+        // Unload resources
         if reduceMemory {
-            unetRefiner?.unloadResources()
             unet.unloadResources()
         }
+        unetRefiner?.unloadResources()
+
 
         // Decode the latent samples to images
         return try decodeToImages(denoisedLatents, configuration: config)
