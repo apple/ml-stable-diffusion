@@ -84,8 +84,10 @@ public extension StableDiffusionXLPipeline {
             FileManager.default.fileExists(atPath: urls.unetRefinerChunk2URL.path) {
             unetRefiner = Unet(chunksAt: [urls.unetRefinerChunk1URL, urls.unetRefinerChunk2URL],
                                configuration: config)
-        } else {
+        } else if FileManager.default.fileExists(atPath: urls.unetRefinerURL.path) {
             unetRefiner = Unet(modelAt: urls.unetRefinerURL, configuration: config)
+        } else {
+            unetRefiner = nil
         }
 
 
