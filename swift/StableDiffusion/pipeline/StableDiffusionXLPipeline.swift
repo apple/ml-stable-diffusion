@@ -213,7 +213,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
 
             // Switch to refiner if specified
             if let refiner = unetRefiner, step == refinerStartStep {
-                self.unet.unloadResources()
+                unet.unloadResources()
 
                 unetModel = refiner
                 currentInput = refinerInput
@@ -270,7 +270,8 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         }
 
         if reduceMemory {
-            unetModel.unloadResources()
+            unetRefiner?.unloadResources()
+            unet.unloadResources()
         }
 
         // Decode the latent samples to images
