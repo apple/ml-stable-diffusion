@@ -221,9 +221,11 @@ def bundle_resources_for_swift_cli(args):
                                      ("vae_decoder", "VAEDecoder"),
                                      ("vae_encoder", "VAEEncoder"),
                                      ("unet", "Unet"),
-                                     ("refiner", "UnetRefiner"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
+                                     ("refiner", "UnetRefiner"),
+                                     ("refiner_chunk1", "UnetRefinerChunk1"),
+                                     ("refiner_chunk2", "UnetRefinerChunk2"),
                                      ("control-unet", "ControlledUnet"),
                                      ("control-unet_chunk1", "ControlledUnetChunk1"),
                                      ("control-unet_chunk2", "ControlledUnetChunk2"),
@@ -892,7 +894,7 @@ def convert_unet(pipe, args, model_name = None):
             f"`unet` already exists at {out_path}, skipping conversion.")
 
     if args.chunk_unet and not unet_chunks_exist:
-        logger.info("Chunking unet in two approximately equal MLModels")
+        logger.info(f"Chunking {model_name} in two approximately equal MLModels")
         args.mlpackage_path = out_path
         args.remove_original = False
         chunk_mlprogram.main(args)

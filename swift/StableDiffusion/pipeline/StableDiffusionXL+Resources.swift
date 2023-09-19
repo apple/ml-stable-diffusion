@@ -16,6 +16,8 @@ public extension StableDiffusionXLPipeline {
         public let unetChunk1URL: URL
         public let unetChunk2URL: URL
         public let unetRefinerURL: URL
+        public let unetRefinerChunk1URL: URL
+        public let unetRefinerChunk2URL: URL
         public let decoderURL: URL
         public let encoderURL: URL
         public let vocabURL: URL
@@ -28,6 +30,8 @@ public extension StableDiffusionXLPipeline {
             unetChunk1URL = baseURL.appending(path: "UnetChunk1.mlmodelc")
             unetChunk2URL = baseURL.appending(path: "UnetChunk2.mlmodelc")
             unetRefinerURL = baseURL.appending(path: "UnetRefiner.mlmodelc")
+            unetRefinerChunk1URL = baseURL.appending(path: "UnetRefinerChunk1.mlmodelc")
+            unetRefinerChunk2URL = baseURL.appending(path: "UnetRefinerChunk2.mlmodelc")
             decoderURL = baseURL.appending(path: "VAEDecoder.mlmodelc")
             encoderURL = baseURL.appending(path: "VAEEncoder.mlmodelc")
             vocabURL = baseURL.appending(path: "vocab.json")
@@ -76,10 +80,12 @@ public extension StableDiffusionXLPipeline {
 
         // Refiner Unet model
         let unetRefiner: Unet?
-        if FileManager.default.fileExists(atPath: urls.unetRefinerURL.path) {
-            unetRefiner = Unet(modelAt: urls.unetRefinerURL, configuration: config)
+        if FileManager.default.fileExists(atPath: urls.unetRefinerChunk1URL.path) &&
+            FileManager.default.fileExists(atPath: urls.unetRefinerChunk2URL.path) {
+            unetRefiner = Unet(chunksAt: [urls.unetRefinerChunk1URL, urls.unetRefinerChunk2URL],
+                               configuration: config)
         } else {
-            unetRefiner = nil
+            unetRefiner = Unet(modelAt: urls.unetRefinerURL, configuration: config)
         }
 
 

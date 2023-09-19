@@ -27,7 +27,7 @@ public struct PipelineConfiguration: Hashable {
     /// Fraction of inference steps to at which to start using the refiner unet if present in `textToImage` mode
     /// Must be between 0 and 1
     /// Higher values will result in fewer refiner steps
-    public var refinerStart: Float = 0.7
+    public var refinerStart: Float = 0.8
     /// Number of images to generate
     public var imageCount: Int = 1
     /// Number of inference steps to perform
