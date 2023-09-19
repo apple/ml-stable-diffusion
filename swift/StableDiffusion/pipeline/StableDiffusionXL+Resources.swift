@@ -92,12 +92,15 @@ public extension StableDiffusionXLPipeline {
 
 
         // Image Decoder
-        let decoder = Decoder(modelAt: urls.decoderURL, configuration: config)
-        
+        // FIXME: Hardcoding to .cpuAndGPU since ANE doesn't support FLOAT32
+        let vaeConfig = config.copy() as! MLModelConfiguration
+        vaeConfig.computeUnits = .cpuAndGPU
+        let decoder = Decoder(modelAt: urls.decoderURL, configuration: vaeConfig)
+
         // Optional Image Encoder
         let encoder: Encoder?
         if FileManager.default.fileExists(atPath: urls.encoderURL.path) {
-            encoder = Encoder(modelAt: urls.encoderURL, configuration: config)
+            encoder = Encoder(modelAt: urls.encoderURL, configuration: vaeConfig)
         } else {
             encoder = nil
         }

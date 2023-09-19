@@ -98,10 +98,12 @@ def _get_out_path(args, submodule_name):
 
 
 def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
-                       output_names, args, out_path=None, precision=None):
+                       output_names, args, out_path=None, precision=None, compute_unit=None):
 
     if out_path is None:
         out_path = _get_out_path(args, submodule_name)
+
+    compute_unit = compute_unit or ct.ComputeUnit[args.compute_unit]
 
     if os.path.exists(out_path):
         logger.info(f"Skipping export because {out_path} already exists")
@@ -112,11 +114,11 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
         # The Swifty CLI we provide uses precompiled Core ML models (.mlmodelc) which incurs compilation only
         # upon first load and mitigates the load time in subsequent runs.
         coreml_model = ct.models.MLModel(
-            out_path, compute_units=ct.ComputeUnit[args.compute_unit])
+            out_path, compute_units=compute_unit)
         logger.info(
             f"Loading {out_path} took {time.time() - start:.1f} seconds")
 
-        coreml_model.compute_unit = ct.ComputeUnit[args.compute_unit]
+        coreml_model.compute_unit = compute_unit
     else:
         logger.info(f"Converting {submodule_name} to CoreML..")
         coreml_model = ct.convert(
@@ -125,7 +127,7 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
             minimum_deployment_target=ct.target.macOS13,
             inputs=_get_coreml_inputs(sample_inputs, args),
             outputs=[ct.TensorType(name=name) for name in output_names],
-            compute_units=ct.ComputeUnit[args.compute_unit],
+            compute_units=compute_unit,
             compute_precision=precision,
             skip_model_load=not args.check_output_correctness,
         )
@@ -484,9 +486,12 @@ def convert_vae_decoder(pipe, args):
     if args.xl_version:
         inputs_dtype = torch.float32
         compute_precision = ct.precision.FLOAT32
+        # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
+        compute_unit = ct.ComputeUnit.CPU_AND_GPU
     else:
         inputs_dtype = torch.float16
         compute_precision = None
+        compute_unit = None
 
     sample_vae_decoder_inputs = {
         "z": torch.rand(*z_shape, dtype=inputs_dtype)
@@ -513,7 +518,7 @@ def convert_vae_decoder(pipe, args):
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_decoder, out_path = _convert_to_coreml(
         "vae_decoder", traced_vae_decoder, sample_vae_decoder_inputs,
-        ["image"], args, precision=compute_precision)
+        ["image"], args, precision=compute_precision, compute_unit=compute_unit)
 
     # Set model metadata
     coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
@@ -581,9 +586,12 @@ def convert_vae_encoder(pipe, args):
     if args.xl_version:
         inputs_dtype = torch.float32
         compute_precision = ct.precision.FLOAT32
+        # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
+        compute_unit = ct.ComputeUnit.CPU_AND_GPU
     else:
         inputs_dtype = torch.float16
         compute_precision = None
+        compute_unit = None
 
     sample_vae_encoder_inputs = {
         "x": torch.rand(*x_shape, dtype=inputs_dtype)
@@ -610,7 +618,7 @@ def convert_vae_encoder(pipe, args):
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
-        ["latent"], args, precision=compute_precision)
+        ["latent"], args, precision=compute_precision, compute_unit=compute_unit)
 
     # Set model metadata
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
