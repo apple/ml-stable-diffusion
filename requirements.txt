@@ -1,4 +1,4 @@
-coremltools>=7.0b1
+coremltools>=7.0
 diffusers[torch]
 torch
 transformers==4.29.2
