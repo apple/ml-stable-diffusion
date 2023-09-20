@@ -122,12 +122,13 @@ def _get_first_chunk_outputs(block, op_idx):
     boundary_vars = set()
     for i in range(op_idx + 1):
         op = block.operations[i]
-        for var in op.outputs:
-            if var.val is None:  # only consider non const vars
-                for child_op in var.child_ops:
-                    child_op_idx = block.operations.index(child_op)
-                    if child_op_idx > op_idx:
-                        boundary_vars.add(var)
+        if not op.op_type.startswith("const"):
+            for var in op.outputs:
+                if var.val is None:  # only consider non const vars
+                    for child_op in var.child_ops:
+                        child_op_idx = block.operations.index(child_op)
+                        if child_op_idx > op_idx:
+                            boundary_vars.add(var)
     return list(boundary_vars)
 
 
