@@ -14,6 +14,7 @@ import coremltools as ct
 from diffusers import (
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
+    StableDiffusionXLImg2ImgPipeline,
     ControlNetModel
 )
 import gc
@@ -1219,7 +1220,13 @@ def convert_controlnet(pipe, args):
         gc.collect()
 
 def get_pipeline(args):
-    if 'xl' in args.model_version:
+    if all(key in args.model_version for key in ['refiner', 'xl']):
+        pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(args.model_version,
+                                                                torch_dtype=torch.float16,
+                                                                variant="fp16",
+                                                                use_safetensors=True,
+                                                                use_auth_token=True)
+    elif 'xl' in args.model_version:
         pipe = StableDiffusionXLPipeline.from_pretrained(args.model_version,
                                                        torch_dtype=torch.float16,
                                                        variant="fp16",
@@ -1229,6 +1236,7 @@ def get_pipeline(args):
         pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
                                                        use_auth_token=True)
     return pipe
+
 
 def main(args):
     os.makedirs(args.o, exist_ok=True)
