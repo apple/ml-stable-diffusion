@@ -72,7 +72,7 @@ class CoreMLModel:
                         f"Expected shape {expected_shape}, got {v.shape} for input: {k}"
                     )
             else:
-                raise ValueError("Received unexpected input kwarg: {k}")
+                raise ValueError(f"Received unexpected input kwarg: {k}")
 
     def __call__(self, **kwargs):
         self._verify_inputs(**kwargs)
