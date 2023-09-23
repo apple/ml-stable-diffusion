@@ -80,7 +80,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             feature_extractor=feature_extractor,
         )
 
-        if safety_checker is None and not xl:
+        if safety_checker is None:
             # Reproduce original warning:
             # https://github.com/huggingface/diffusers/blob/v0.9.0/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py#L119
             logger.warning(
@@ -128,21 +128,15 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                        ):
 
         batch_size = len(prompt) if isinstance(prompt, list) else 1
-        print('SELFXL')
-        print(self.xl)
+
         if self.xl is True:
             prompts = [prompt, prompt_2] if prompt_2 is not None else [prompt, prompt]
 
-            print('*' * 20)
-            print('tokenizers')
-            print(self.tokenizer)
-            print(self.tokenizer_2)
-            print('*' * 20)
-            tokenizers = [self.tokenizer, self.tokenizer_2] if self.tokenizer_2 is not None else [self.tokenizer,
-                                                                                                  self.tokenizer]
+            # refiner uses only one tokenizer and text encoder (tokenizer_2 and text_encoder_2)
+            tokenizers = [self.tokenizer, self.tokenizer_2] if self.tokenizer is not None else [self.tokenizer_2]
 
-            text_encoders = [self.text_encoder, self.text_encoder_2] if self.text_encoder_2 is not None else [
-                self.text_encoder]
+            text_encoders = [self.text_encoder, self.text_encoder_2] if self.text_encoder is not None else [
+                self.text_encoder_2]
             hidden_state_key = 'hidden_embeds'
         else:
             prompts = [prompt]
@@ -211,8 +205,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                 raise ValueError(
                     f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
                     f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
+                    " the batch size of `prompt`.")
             else:
                 uncond_tokens = [negative_prompt, negative_prompt_2]
 
@@ -229,24 +222,12 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                     return_tensors="np",
                 )
                 uncond_input_ids = uncond_input.input_ids
-                print('*' * 50)
-                print('Negative Prompt: ', negative_prompt)
-
-                print('Input IDs')
-                print(uncond_input_ids.shape)
-                print(uncond_input_ids)
-                print('*' * 50)
 
                 negative_embeddings = text_encoder(
                     input_ids=uncond_input_ids.astype(np.float32)
                 )
 
                 negative_text_embeddings = negative_embeddings[hidden_state_key]
-
-                print('Text Encoder')
-                print(negative_text_embeddings.shape)
-                print(negative_text_embeddings)
-                print('*' * 50)
 
                 negative_prompt_embeds_list.append(negative_text_embeddings)
 
@@ -255,20 +236,6 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                     negative_pooled_prompt_embeds = negative_embeddings['pooled_outputs']
 
             negative_prompt_embeds = np.concatenate(negative_prompt_embeds_list, axis=-1)
-            print(negative_prompt_embeds.shape)
-
-        print('_' * 10)
-        print(prompt_embeds.shape)
-        print(prompt_embeds)
-        print('_' * 10)
-        print(negative_prompt_embeds.shape)
-        print(negative_prompt_embeds)
-        print('_' * 10)
-        print(pooled_prompt_embeds.shape)
-        print(pooled_prompt_embeds)
-        print('_' * 10)
-        print(negative_pooled_prompt_embeds.shape)
-        print(negative_pooled_prompt_embeds)
 
         if do_classifier_free_guidance:
             # For classifier free guidance, we need to do two forward passes.
@@ -474,7 +441,6 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
 
         # 3. Encode input prompt
-
         text_embeddings, pooled_prompt_embeds = self._encode_prompt(
             prompt=prompt,
             prompt_2=None,
@@ -482,7 +448,11 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             negative_prompt=negative_prompt,
             negative_prompt_2=None
         )
+
+        # 4. Prepare XL kwargs if needed
         unet_additional_kwargs = {}
+
+        # we add pooled prompt embeds + time_ids to unet kwargs
         if self.xl:
             add_text_embeds = pooled_prompt_embeds
             add_time_ids = self._get_add_time_ids(original_size, crops_coords_top_left, target_size,
@@ -493,11 +463,11 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             unet_additional_kwargs.update({'text_embeds': add_text_embeds.astype(np.float16),
                                            'time_ids': add_time_ids.astype(np.float16)})
 
-        # 4. Prepare timesteps
+        # 5. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps)
         timesteps = self.scheduler.timesteps
 
-        # 5. Prepare latent variables and controlnet cond
+        # 6. Prepare latent variables and controlnet cond
         num_channels_latents = self.unet.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -515,10 +485,10 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                 num_images_per_prompt,
             )
 
-        # 6. Prepare extra step kwargs
+        # 7. Prepare extra step kwargs
         extra_step_kwargs = self.prepare_extra_step_kwargs(eta)
 
-        # 7. Denoising loop
+        # 8. Denoising loop
         for i, t in enumerate(self.progress_bar(timesteps)):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = np.concatenate(
@@ -531,35 +501,37 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
 
             # controlnet
             if controlnet_cond:
-                additional_residuals = self.run_controlnet(
+                control_net_additional_residuals = self.run_controlnet(
                     sample=latent_model_input,
                     timestep=np.array([t, t]),
                     encoder_hidden_states=text_embeddings,
                     controlnet_cond=controlnet_cond,
                 )
             else:
-                additional_residuals = {}
+                control_net_additional_residuals = {}
 
             # predict the noise residual
+            unet_additional_kwargs = unet_additional_kwargs | control_net_additional_residuals
+
             noise_pred = self.unet(
                 sample=latent_model_input.astype(np.float16),
                 timestep=np.array([t, t], np.float16),
                 encoder_hidden_states=text_embeddings.astype(np.float16),
-                **(unet_additional_kwargs | additional_residuals),
+                **unet_additional_kwargs,
             )["noise_pred"]
 
             # perform guidance
             if do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = np.split(noise_pred, 2)
                 noise_pred = noise_pred_uncond + guidance_scale * (
-                        noise_pred_text - noise_pred_uncond)
+                    noise_pred_text - noise_pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.scheduler.step(torch.from_numpy(noise_pred),
                                           t,
                                           torch.from_numpy(latents),
                                           **extra_step_kwargs,
-                                          ).prev_sample.numpy()
+            ).prev_sample.numpy()
 
             # call the callback, if provided
             if callback is not None and i % callback_steps == 0:
@@ -593,9 +565,7 @@ def get_available_schedulers():
         schedulers[scheduler().__class__.__name__.replace("Scheduler", "")] = scheduler
     return schedulers
 
-
 SCHEDULER_MAP = get_available_schedulers()
-
 
 def get_coreml_pipe(pytorch_pipe,
                     mlpackages_dir,
@@ -616,14 +586,12 @@ def get_coreml_pipe(pytorch_pipe,
             f"Default={pytorch_pipe.scheduler}, Override={scheduler_override}")
 
     # Gather configured tokenizer and scheduler attributes from the original pipe
-
-    # TODO: Can create flag or detect xl in model-version
     if 'xl' in model_version:
         coreml_pipe_kwargs = {
             "tokenizer": pytorch_pipe.tokenizer,
+            'tokenizer_2': pytorch_pipe.tokenizer_2,
             "scheduler": pytorch_pipe.scheduler if scheduler_override is None else scheduler_override,
             "force_zeros_for_empty_prompt": force_zeros_for_empty_prompt,
-            'tokenizer_2': pytorch_pipe.tokenizer_2,
             'xl': True
         }
 
@@ -636,13 +604,13 @@ def get_coreml_pipe(pytorch_pipe,
         }
         model_names_to_load = ["text_encoder", "unet", "vae_decoder"]
 
-        if getattr(pytorch_pipe, "safety_checker", None) is not None:
-            model_names_to_load.append("safety_checker")
-        else:
-            logger.warning(
-                f"Original diffusers pipeline for {model_version} does not have a safety_checker, "
-                "Core ML pipeline will mirror this behavior.")
-            coreml_pipe_kwargs["safety_checker"] = None
+    if getattr(pytorch_pipe, "safety_checker", None) is not None:
+        model_names_to_load.append("safety_checker")
+    else:
+        logger.warning(
+            f"Original diffusers pipeline for {model_version} does not have a safety_checker, "
+            "Core ML pipeline will mirror this behavior.")
+        coreml_pipe_kwargs["safety_checker"] = None
 
     if delete_original_pipe:
         del pytorch_pipe
@@ -688,7 +656,7 @@ def get_coreml_pipe(pytorch_pipe,
 def get_image_path(args, **override_kwargs):
     """ mkdir output folder and encode metadata in the filename
     """
-    out_folder = os.path.join(args.o, "_".join(args.prompt.replace("/", "_").rsplit(" ")))[:100]
+    out_folder = os.path.join(args.o, "_".join(args.prompt.replace("/", "_").rsplit(" ")))
     os.makedirs(out_folder, exist_ok=True)
 
     out_fname = f"randomSeed_{override_kwargs.get('seed', None) or args.seed}"
@@ -701,21 +669,19 @@ def get_image_path(args, **override_kwargs):
 
     return os.path.join(out_folder, out_fname + ".png")
 
-
 def prepare_controlnet_cond(image_path, height, width):
     image = Image.open(image_path).convert("RGB")
     image = image.resize((height, width), resample=Image.LANCZOS)
     image = np.array(image).transpose(2, 0, 1) / 255.0
     return image
 
-
 def main(args):
     logger.info(f"Setting random seed to {args.seed}")
     np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
 
     logger.info("Initializing PyTorch pipe for reference configuration")
-    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+
+    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
     SDP = StableDiffusionXLPipeline if 'xl' in args.model_version else StableDiffusionPipeline
 
     pytorch_pipe = SDP.from_pretrained(
@@ -724,10 +690,17 @@ def main(args):
         local_files_only=True
     )
 
+    # Get Scheduler
     user_specified_scheduler = None
     if args.scheduler is not None:
         user_specified_scheduler = SCHEDULER_MAP[
             args.scheduler].from_config(pytorch_pipe.scheduler.config)
+
+    # Get Force Zeros Config if it exists
+    force_zeros_for_empty_prompt: bool = False
+    if 'force_zeros_for_empty_prompt' in pytorch_pipe.config:
+        force_zeros_for_empty_prompt = pytorch_pipe.config['force_zeros_for_empty_prompt']
+
 
     coreml_pipe = get_coreml_pipe(
         pytorch_pipe=pytorch_pipe,
@@ -736,7 +709,7 @@ def main(args):
         compute_unit=args.compute_unit,
         scheduler_override=user_specified_scheduler,
         controlnet_models=args.controlnet,
-        force_zeros_for_empty_prompt=not args.dont_force_zeros_for_empty_prompt
+        force_zeros_for_empty_prompt=force_zeros_for_empty_prompt
     )
 
     if args.controlnet:
@@ -800,7 +773,7 @@ if __name__ == "__main__":
         choices=tuple(SCHEDULER_MAP.keys()),
         default=None,
         help=("The scheduler to use for running the reverse diffusion process. "
-              "If not specified, the default scheduler from the diffusers pipeline is utilized"))
+             "If not specified, the default scheduler from the diffusers pipeline is utilized"))
     parser.add_argument(
         "--num-inference-steps",
         default=50,
@@ -816,21 +789,17 @@ if __name__ == "__main__":
         nargs="*",
         type=str,
         help=("Enables ControlNet and use control-unet instead of unet for additional inputs. "
-              "For Multi-Controlnet, provide the model names separated by spaces."))
+            "For Multi-Controlnet, provide the model names separated by spaces."))
     parser.add_argument(
         "--controlnet-inputs",
         nargs="*",
         type=str,
         help=("Image paths for ControlNet inputs. "
-              "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
+            "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
     parser.add_argument(
         "--negative-prompt",
         default=None,
         help="The negative text prompt to be used for text-to-image generation.")
-    parser.add_argument(
-        "--dont-force-zeros-for-empty-prompt",
-        action='store_true',
-        help="disable zeroing out empty negative prompt embeddings")
 
     args = parser.parse_args()
     main(args)
