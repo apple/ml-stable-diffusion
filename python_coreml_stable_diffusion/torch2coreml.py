@@ -13,12 +13,7 @@ from copy import deepcopy
 import coremltools as ct
 from diffusers import (
     StableDiffusionPipeline,
-<<<<<<< HEAD
     DiffusionPipeline,
-=======
-    StableDiffusionXLPipeline,
-    StableDiffusionXLImg2ImgPipeline,
->>>>>>> main
     ControlNetModel
 )
 import gc
