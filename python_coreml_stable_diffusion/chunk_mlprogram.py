@@ -31,8 +31,10 @@ import shutil
 import time
 
 
-def _verify_output_correctness_of_chunks(full_model, first_chunk_model,
-                                         second_chunk_model):
+def _verify_output_correctness_of_chunks(full_model,
+                                         first_chunk_model=None,
+                                         second_chunk_model=None,
+                                         pipeline_model=None,):
     """ Verifies the end-to-end output correctness of full (original) model versus chunked models
     """
     # Generate inputs for first chunk and full model
@@ -40,30 +42,40 @@ def _verify_output_correctness_of_chunks(full_model, first_chunk_model,
     for input_desc in full_model._spec.description.input:
         input_dict[input_desc.name] = random_gen_input_feature_type(input_desc)
 
-    # Generate outputs for first chunk and full model
+    # Generate outputs for full model
     outputs_from_full_model = full_model.predict(input_dict)
-    outputs_from_first_chunk_model = first_chunk_model.predict(input_dict)
 
-    # Prepare inputs for second chunk model from first chunk's outputs and regular inputs
-    second_chunk_input_dict = {}
-    for input_desc in second_chunk_model._spec.description.input:
-        if input_desc.name in outputs_from_first_chunk_model:
-            second_chunk_input_dict[
-                input_desc.name] = outputs_from_first_chunk_model[
+    if pipeline_model is not None:
+        outputs_from_pipeline_model = pipeline_model.predict(input_dict)
+        final_outputs = outputs_from_pipeline_model
+
+    elif first_chunk_model is not None and second_chunk_model is not None:
+        # Generate outputs for first chunk
+        outputs_from_first_chunk_model = first_chunk_model.predict(input_dict)
+
+        # Prepare inputs for second chunk model from first chunk's outputs and regular inputs
+        second_chunk_input_dict = {}
+        for input_desc in second_chunk_model._spec.description.input:
+            if input_desc.name in outputs_from_first_chunk_model:
+                second_chunk_input_dict[
+                    input_desc.name] = outputs_from_first_chunk_model[
+                        input_desc.name]
+            else:
+                second_chunk_input_dict[input_desc.name] = input_dict[
                     input_desc.name]
-        else:
-            second_chunk_input_dict[input_desc.name] = input_dict[
-                input_desc.name]
 
-    # Generate output for second chunk model
-    outputs_from_second_chunk_model = second_chunk_model.predict(
-        second_chunk_input_dict)
+        # Generate output for second chunk model
+        outputs_from_second_chunk_model = second_chunk_model.predict(
+            second_chunk_input_dict)
+        final_outputs = outputs_from_second_chunk_model
+    else:
+        raise ValueError
 
     # Verify correctness across all outputs from second chunk and full model
     for out_name in outputs_from_full_model.keys():
         torch2coreml.report_correctness(
             original_outputs=outputs_from_full_model[out_name],
-            final_outputs=outputs_from_second_chunk_model[out_name],
+            final_outputs=final_outputs[out_name],
             log_prefix=f"{out_name}")
 
 
@@ -122,12 +134,13 @@ def _get_first_chunk_outputs(block, op_idx):
     boundary_vars = set()
     for i in range(op_idx + 1):
         op = block.operations[i]
-        for var in op.outputs:
-            if var.val is None:  # only consider non const vars
-                for child_op in var.child_ops:
-                    child_op_idx = block.operations.index(child_op)
-                    if child_op_idx > op_idx:
-                        boundary_vars.add(var)
+        if not op.op_type.startswith("const"):
+            for var in op.outputs:
+                if var.val is None:  # only consider non const vars
+                    for child_op in var.child_ops:
+                        child_op_idx = block.operations.index(child_op)
+                        if child_op_idx > op_idx:
+                            boundary_vars.add(var)
     return list(boundary_vars)
 
 
@@ -301,16 +314,32 @@ def main(args):
         shutil.rmtree(args.mlpackage_path)
         logger.info("Done.")
 
-    # Save the chunked models to disk
-    out_path_chunk1 = os.path.join(args.o, name + "_chunk1.mlpackage")
-    out_path_chunk2 = os.path.join(args.o, name + "_chunk2.mlpackage")
+    if args.merge_chunks_in_pipeline_model:
+        # Make a single pipeline model to manage the model chunks
+        pipeline_model = ct.utils.make_pipeline(model_chunk1, model_chunk2)
+        out_path_pipeline = os.path.join(args.o, name + "_chunked_pipeline.mlpackage")
 
-    logger.info(
-        f"Saved chunks in {args.o} with the suffix _chunk1.mlpackage and _chunk2.mlpackage"
-    )
-    model_chunk1.save(out_path_chunk1)
-    model_chunk2.save(out_path_chunk2)
-    logger.info("Done.")
+        # Save and reload to ensure CPU placement
+        pipeline_model.save(out_path_pipeline)
+        pipeline_model = ct.models.MLModel(out_path_pipeline)
+
+        if args.check_output_correctness:
+            logger.info("Verifying output correctness of pipeline model")
+            _verify_output_correctness_of_chunks(
+                full_model=model,
+                pipeline_model=pipeline_model,
+            )
+    else:
+        # Save the chunked models to disk
+        out_path_chunk1 = os.path.join(args.o, name + "_chunk1.mlpackage")
+        out_path_chunk2 = os.path.join(args.o, name + "_chunk2.mlpackage")
+
+        logger.info(
+            f"Saved chunks in {args.o} with the suffix _chunk1.mlpackage and _chunk2.mlpackage"
+        )
+        model_chunk1.save(out_path_chunk1)
+        model_chunk2.save(out_path_chunk2)
+        logger.info("Done.")
 
 
 if __name__ == "__main__":
@@ -339,6 +368,12 @@ if __name__ == "__main__":
         help=
         ("If specified, compares the outputs of original Core ML model with that of pipelined CoreML model chunks and reports PSNR in dB. ",
          "Enabling this feature uses more memory. Disable it if your machine runs out of memory."
+         ))
+    parser.add_argument(
+        "--merge-chunks-in-pipeline-model",
+        action="store_true",
+        help=
+        ("If specified, model chunks are managed inside a single pipeline model for easier asset maintenance"
          ))
 
     args = parser.parse_args()

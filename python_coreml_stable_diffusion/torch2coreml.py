@@ -13,7 +13,12 @@ from copy import deepcopy
 import coremltools as ct
 from diffusers import (
     StableDiffusionPipeline,
+<<<<<<< HEAD
     DiffusionPipeline,
+=======
+    StableDiffusionXLPipeline,
+    StableDiffusionXLImg2ImgPipeline,
+>>>>>>> main
     ControlNetModel
 )
 import gc
@@ -1282,7 +1287,9 @@ def get_pipeline(args):
                                             use_safetensors=True,
                                             use_auth_token=True)
     logger.info(f"Done. Pipeline in effect: {pipe.__class__.__name__}")
+
     return pipe
+
 
 def main(args):
     os.makedirs(args.o, exist_ok=True)

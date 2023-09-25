@@ -12,6 +12,7 @@ logger.setLevel('INFO')
 
 import numpy as np
 import os
+from PIL import Image
 from python_coreml_stable_diffusion.torch2coreml import compute_psnr, get_pipeline
 import time
 
@@ -30,11 +31,33 @@ PALETTIZE_MIN_SIZE = 1e5
 
 # Signal integrity is computed based on these 4 random prompts
 RANDOM_TEST_DATA = [
-    "a photo of an astronaut riding a horse on mars",
-    "Astronaut in a jungle, cold color palette, muted colors, detailed, 8k",
-    "a photo of a dog",
-    "a photo of a cat",
+    "a black and brown dog standing outside a door.",
+    "a person on a motorcycle makes a turn on the track.",
+    "inflatable boats sit on the arizona river, and on the bank",
+    "a white cat sitting under a white umbrella",
+    "black bear standing in a field of grass under a tree.",
+    "a train that is parked on tracks and has graffiti writing on it, with a mountain range in the background.",
+    "a cake inside of a pan sitting in an oven.",
+    "a table with paper plates and flowers in a home",
 ]
+
+TEST_RESOLUTION = 768
+
+RANDOM_TEST_IMAGE_DATA = [
+    Image.open(
+        requests.get(path, stream=True).raw).convert("RGB").resize(
+            (TEST_RESOLUTION, TEST_RESOLUTION), Image.LANCZOS
+    ) for path in [
+        "http://farm1.staticflickr.com/106/298138827_19bb723252_z.jpg",
+        "http://farm4.staticflickr.com/3772/9666116202_648cd752d6_z.jpg",
+        "http://farm3.staticflickr.com/2238/2472574092_f5534bb2f7_z.jpg",
+        "http://farm1.staticflickr.com/220/475442674_47d81fdc2c_z.jpg",
+        "http://farm8.staticflickr.com/7231/7359341784_4c5358197f_z.jpg",
+        "http://farm8.staticflickr.com/7283/8737653089_d0c77b8597_z.jpg",
+        "http://farm3.staticflickr.com/2454/3989339438_2f32b76ebb_z.jpg",
+        "http://farm1.staticflickr.com/34/123005230_13051344b1_z.jpg",
+]]
+
 
 # Copied from https://github.com/apple/coremltools/blob/7.0b1/coremltools/optimize/coreml/_quantization_passes.py#L602
 from coremltools.converters.mil.mil import types
@@ -217,14 +240,11 @@ def fake_palette_from_recipe(module, recipe):
 
     logger.info(f"Palettized to {tot_bits/tot_numel:.2f}-bits mixed palette ({tot_bits/8e6} MB) ")
 
-
-TEST_RESOLUTION = 768
-
 # Globally synced RNG state
 rng = torch.Generator()
 rng_state = rng.get_state()
 
-def run_pipe(pipe, prompts):
+def run_pipe(pipe):
     if torch.backends.mps.is_available():
         device = "mps"
     elif torch.cuda.is_available():
@@ -235,18 +255,29 @@ def run_pipe(pipe, prompts):
 
     global rng, rng_state
     rng.set_state(rng_state)
-    return np.array([latent.cpu().numpy() for latent in pipe.to(device)(
-        prompt=prompts,
+    kwargs = dict(
+        prompt=RANDOM_TEST_DATA,
+        negative_prompt=[""] * len(RANDOM_TEST_DATA),
         num_inference_steps=1,
         height=TEST_RESOLUTION,
         width=TEST_RESOLUTION,
         output_type="latent",
-        generator=rng).images])
+        generator=rng
+    )
+    if "Img2Img" in pipe.__class__.__name__:
+        kwargs["image"] = RANDOM_TEST_IMAGE_DATA
+        kwargs.pop("height")
+        kwargs.pop("width")
+
+        # Run a single denoising step
+        kwargs["num_inference_steps"] = 4
+        kwargs["strength"] = 0.25
+
+    return np.array([latent.cpu().numpy() for latent in pipe.to(device)(**kwargs).images])
 
 
 def benchmark_signal_integrity(pipe,
                                candidates,
-                               sample_input_batch,
                                nbits,
                                cumulative,
                                in_ngroups=1,
@@ -263,7 +294,7 @@ def benchmark_signal_integrity(pipe,
 
     # If reference outputs are not provided, treat current pipe as reference
     if ref_out is None:
-        ref_out = run_pipe(pipe, sample_input_batch)
+        ref_out = run_pipe(pipe)
 
     for candidate in tqdm(candidates):
         palettized = False
@@ -280,7 +311,7 @@ def benchmark_signal_integrity(pipe,
         if not palettized:
             raise KeyError(name)
 
-        test_out = run_pipe(pipe, sample_input_batch)
+        test_out = run_pipe(pipe)
 
         if not cumulative:
             restore_weight(module, orig_weight)
@@ -304,11 +335,11 @@ def descending_psnr_order(results):
 def simulate_quant_fn(ref_pipe, quantization_to_simulate):
     simulated_pipe = deepcopy(ref_pipe.to('cpu'))
     quantization_to_simulate(simulated_pipe.unet)
-    simulated_out = run_pipe(simulated_pipe, RANDOM_TEST_DATA)
+    simulated_out = run_pipe(simulated_pipe)
     del simulated_pipe
     gc.collect()
 
-    ref_out = run_pipe(ref_pipe, RANDOM_TEST_DATA)
+    ref_out = run_pipe(ref_pipe)
     simulated_psnr = sum([
         float(f"{compute_psnr(r,t):.1f}")
         for r,t in zip(ref_out, simulated_out)
@@ -414,7 +445,7 @@ def main(args):
         logger.info("Done.")
 
     # Cache reference outputs
-    ref_out = run_pipe(pipe, RANDOM_TEST_DATA)
+    ref_out = run_pipe(pipe)
 
     # Bookkeeping
     os.makedirs(args.o, exist_ok=True)
@@ -442,7 +473,6 @@ def main(args):
             results['single_layer'][str(nbits)] = benchmark_signal_integrity(
                 pipe,
                 candidates,
-                RANDOM_TEST_DATA,
                 nbits,
                 cumulative=False,
                 ref_out=ref_out,
@@ -457,7 +487,6 @@ def main(args):
             results['cumulative'][str(nbits)] = benchmark_signal_integrity(
                 deepcopy(pipe),
                 sorted_candidates,
-                RANDOM_TEST_DATA,
                 nbits,
                 cumulative=True,
                 ref_out=ref_out,

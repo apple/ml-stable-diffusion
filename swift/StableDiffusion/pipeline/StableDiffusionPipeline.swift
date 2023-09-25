@@ -21,6 +21,8 @@ public enum StableDiffusionRNG {
     case numpyRNG
     /// RNG that matches PyTorch CPU implementation.
     case torchRNG
+    /// RNG that matches PyTorch CUDA implementation.
+    case nvidiaRNG
 }
 
 public enum PipelineError: String, Swift.Error {
@@ -400,6 +402,8 @@ extension StableDiffusionPipelineProtocol {
             return NumPyRandomSource(seed: seed)
         case .torchRNG:
             return TorchRandomSource(seed: seed)
+        case .nvidiaRNG:
+            return NvRandomSource(seed: seed)
         }
     }
 
