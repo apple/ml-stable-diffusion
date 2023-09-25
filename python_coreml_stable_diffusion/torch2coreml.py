@@ -905,6 +905,7 @@ def convert_unet(pipe, args, model_name = None):
         logger.info(f"Chunking {model_name} in two approximately equal MLModels")
         args.mlpackage_path = out_path
         args.remove_original = False
+        args.merge_chunks_in_pipeline_model = False
         chunk_mlprogram.main(args)
 
 
