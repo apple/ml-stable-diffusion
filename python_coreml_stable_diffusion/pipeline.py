@@ -458,6 +458,12 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             add_time_ids = self._get_add_time_ids(original_size, crops_coords_top_left, target_size,
                                                   text_embeddings.dtype)
             if do_classifier_free_guidance:
+
+                # TODO: This checks if the time_ids input is looking for time_ids.shape == (12,) or (2, 6)
+                # Remove once model input shapes are ubiquitous
+                if len(self.unet.expected_inputs['time_ids']['shape']) > 1:
+                    add_time_ids = [add_time_ids]
+
                 add_time_ids = np.concatenate([add_time_ids, add_time_ids])
 
             unet_additional_kwargs.update({'text_embeds': add_text_embeds.astype(np.float16),
