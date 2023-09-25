@@ -66,7 +66,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         self.unetRefiner = unetRefiner
         self.decoder = decoder
         self.encoder = encoder
-        self.reduceMemory = true
+        self.reduceMemory = reduceMemory
     }
 
     /// Load required resources for this pipeline
