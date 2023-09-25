@@ -483,7 +483,7 @@ def convert_vae_decoder(pipe, args):
         args.latent_w or pipe.unet.config.sample_size,  # w
     )
 
-    if args.xl_version:
+    if args.custom_vae_version is None and args.xl_version:
         inputs_dtype = torch.float32
         compute_precision = ct.precision.FLOAT32
         # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
@@ -1277,11 +1277,22 @@ def get_pipeline(args):
     model_version = args.model_version
 
     logger.info(f"Initializing DiffusionPipeline with {model_version}..")
-    pipe = DiffusionPipeline.from_pretrained(model_version,
+    if args.custom_vae_version:
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained(args.custom_vae_version, torch_dtype=torch.float16)
+        pipe = DiffusionPipeline.from_pretrained(model_version,
+                                            torch_dtype=torch.float16,
+                                            variant="fp16",
+                                            use_safetensors=True,
+                                            vae=vae,
+                                            use_auth_token=True)
+    else:
+        pipe = DiffusionPipeline.from_pretrained(model_version,
                                             torch_dtype=torch.float16,
                                             variant="fp16",
                                             use_safetensors=True,
                                             use_auth_token=True)
+
     logger.info(f"Done. Pipeline in effect: {pipe.__class__.__name__}")
 
     return pipe
@@ -1394,6 +1405,15 @@ def parser_spec():
          "If specified, this argument will convert and bundle the refiner unet only alongside the model unet. "
          "If you would like to convert a refiner model on it's own, use the --model-version argument instead."
          "For available versions: https://huggingface.co/models?sort=trending&search=stable-diffusion+refiner"
+         ))
+    parser.add_argument(
+        "--custom-vae-version",
+        type=str,
+        default=None,
+        help=
+        ("Custom VAE checkpoint to override the pipeline's built-in VAE. "
+         "If specified, the specified VAE will be converted instead of the one associated to the `--model-version` checkpoint. "
+         "No precision override is applied when using a custom VAE."
          ))
     parser.add_argument("--compute-unit",
                         choices=tuple(cu
