@@ -13,8 +13,7 @@ from copy import deepcopy
 import coremltools as ct
 from diffusers import (
     StableDiffusionPipeline,
-    StableDiffusionXLPipeline,
-    StableDiffusionXLImg2ImgPipeline,
+    DiffusionPipeline,
     ControlNetModel
 )
 import gc
@@ -99,10 +98,12 @@ def _get_out_path(args, submodule_name):
 
 
 def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
-                       output_names, args, out_path=None, precision=None):
+                       output_names, args, out_path=None, precision=None, compute_unit=None):
 
     if out_path is None:
         out_path = _get_out_path(args, submodule_name)
+
+    compute_unit = compute_unit or ct.ComputeUnit[args.compute_unit]
 
     if os.path.exists(out_path):
         logger.info(f"Skipping export because {out_path} already exists")
@@ -113,11 +114,11 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
         # The Swifty CLI we provide uses precompiled Core ML models (.mlmodelc) which incurs compilation only
         # upon first load and mitigates the load time in subsequent runs.
         coreml_model = ct.models.MLModel(
-            out_path, compute_units=ct.ComputeUnit[args.compute_unit])
+            out_path, compute_units=compute_unit)
         logger.info(
             f"Loading {out_path} took {time.time() - start:.1f} seconds")
 
-        coreml_model.compute_unit = ct.ComputeUnit[args.compute_unit]
+        coreml_model.compute_unit = compute_unit
     else:
         logger.info(f"Converting {submodule_name} to CoreML..")
         coreml_model = ct.convert(
@@ -125,17 +126,14 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
             convert_to="mlprogram",
             minimum_deployment_target=ct.target.macOS13,
             inputs=_get_coreml_inputs(sample_inputs, args),
-            outputs=[ct.TensorType(name=name) for name in output_names],
-            compute_units=ct.ComputeUnit[args.compute_unit],
+            outputs=[ct.TensorType(name=name, dtype=np.float32) for name in output_names],
+            compute_units=compute_unit,
             compute_precision=precision,
-            # skip_model_load=True,
+            skip_model_load=not args.check_output_correctness,
         )
 
         del torchscript_module
         gc.collect()
-
-        coreml_model.save(out_path)
-        logger.info(f"Saved {submodule_name} model to {out_path}")
 
     return coreml_model, out_path
 
@@ -143,7 +141,7 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
 def quantize_weights(args):
     """ Quantize weights to args.quantize_nbits using a palette (look-up table)
     """
-    for model_name in ["text_encoder", "text_encoder_2", "unet", "control-unet"]:
+    for model_name in ["text_encoder", "text_encoder_2", "unet", "refiner", "control-unet"]:
         logger.info(f"Quantizing {model_name} to {args.quantize_nbits}-bit precision")
         out_path = _get_out_path(args, model_name)
         _quantize_weights(
@@ -227,6 +225,9 @@ def bundle_resources_for_swift_cli(args):
                                      ("unet", "Unet"),
                                      ("unet_chunk1", "UnetChunk1"),
                                      ("unet_chunk2", "UnetChunk2"),
+                                     ("refiner", "UnetRefiner"),
+                                     ("refiner_chunk1", "UnetRefinerChunk1"),
+                                     ("refiner_chunk2", "UnetRefinerChunk2"),
                                      ("control-unet", "ControlledUnet"),
                                      ("control-unet_chunk1", "ControlledUnetChunk1"),
                                      ("control-unet_chunk2", "ControlledUnetChunk2"),
@@ -343,7 +344,7 @@ def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     hidden_layer = -2 if args.xl_version else None
     reference_text_encoder = TextEncoder(with_hidden_states_for_layer=hidden_layer).eval()
 
-    logger.info("JIT tracing text_encoder..")
+    logger.info(f"JIT tracing {submodule_name}..")
     reference_text_encoder = torch.jit.trace(
         reference_text_encoder,
         (sample_text_encoder_inputs["input_ids"].to(torch.int32), ),
@@ -482,12 +483,15 @@ def convert_vae_decoder(pipe, args):
         args.latent_w or pipe.unet.config.sample_size,  # w
     )
 
-    if args.xl_version:
+    if args.custom_vae_version is None and args.xl_version:
         inputs_dtype = torch.float32
         compute_precision = ct.precision.FLOAT32
+        # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
+        compute_unit = ct.ComputeUnit.CPU_AND_GPU
     else:
         inputs_dtype = torch.float16
         compute_precision = None
+        compute_unit = None
 
     sample_vae_decoder_inputs = {
         "z": torch.rand(*z_shape, dtype=inputs_dtype)
@@ -514,11 +518,14 @@ def convert_vae_decoder(pipe, args):
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_decoder, out_path = _convert_to_coreml(
         "vae_decoder", traced_vae_decoder, sample_vae_decoder_inputs,
-        ["image"], args, precision=compute_precision)
+        ["image"], args, precision=compute_precision, compute_unit=compute_unit)
 
     # Set model metadata
     coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+    if args.xl_version:
+        coreml_vae_decoder.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+    else:
+        coreml_vae_decoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_decoder.version = args.model_version
     coreml_vae_decoder.short_description = \
         "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
@@ -569,15 +576,25 @@ def convert_vae_encoder(pipe, args):
     height = (args.latent_h or pipe.unet.config.sample_size) * 8
     width = (args.latent_w or pipe.unet.config.sample_size) * 8
     
-    z_shape = (
+    x_shape = (
         1,  # B
         3,  # C (RGB range from -1 to 1)
         height,  # H
         width,  # w
     )
 
+    if args.xl_version:
+        inputs_dtype = torch.float32
+        compute_precision = ct.precision.FLOAT32
+        # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
+        compute_unit = ct.ComputeUnit.CPU_AND_GPU
+    else:
+        inputs_dtype = torch.float16
+        compute_precision = None
+        compute_unit = None
+
     sample_vae_encoder_inputs = {
-        "z": torch.rand(*z_shape, dtype=torch.float16)
+        "x": torch.rand(*x_shape, dtype=inputs_dtype)
     }
 
     class VAEEncoder(nn.Module):
@@ -589,30 +606,33 @@ def convert_vae_encoder(pipe, args):
             self.quant_conv = pipe.vae.quant_conv.to(dtype=torch.float32)
             self.encoder = pipe.vae.encoder.to(dtype=torch.float32)
 
-        def forward(self, z):
-            return self.quant_conv(self.encoder(z))
+        def forward(self, x):
+            return self.quant_conv(self.encoder(x))
 
     baseline_encoder = VAEEncoder().eval()
 
     # No optimization needed for the VAE Encoder as it is a pure ConvNet
     traced_vae_encoder = torch.jit.trace(
-        baseline_encoder, (sample_vae_encoder_inputs["z"].to(torch.float32), ))
+        baseline_encoder, (sample_vae_encoder_inputs["x"].to(torch.float32), ))
 
     modify_coremltools_torch_frontend_badbmm()
     coreml_vae_encoder, out_path = _convert_to_coreml(
         "vae_encoder", traced_vae_encoder, sample_vae_encoder_inputs,
-        ["latent"], args)
+        ["latent"], args, precision=compute_precision, compute_unit=compute_unit)
 
     # Set model metadata
     coreml_vae_encoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-    coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+    if args.xl_version:
+        coreml_vae_encoder.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+    else:
+        coreml_vae_encoder.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
     coreml_vae_encoder.version = args.model_version
     coreml_vae_encoder.short_description = \
         "Stable Diffusion generates images conditioned on text and/or other images as input through the diffusion process. " \
         "Please refer to https://arxiv.org/abs/2112.10752 for details."
 
     # Set the input descriptions
-    coreml_vae_encoder.input_description["z"] = \
+    coreml_vae_encoder.input_description["x"] = \
         "The input image to base the initial latents on normalized to range [-1, 1]"
 
     # Set the output descriptions
@@ -625,7 +645,7 @@ def convert_vae_encoder(pipe, args):
     # Parity check PyTorch vs CoreML
     if args.check_output_correctness:
         baseline_out = baseline_encoder(
-            z=sample_vae_encoder_inputs["z"].to(torch.float32)).numpy()
+            x=sample_vae_encoder_inputs["x"].to(torch.float32)).numpy()
         coreml_out = list(
             coreml_vae_encoder.predict(
                 {k: v.numpy()
@@ -637,13 +657,13 @@ def convert_vae_encoder(pipe, args):
     gc.collect()
 
 
-def convert_unet(pipe, args):
+def convert_unet(pipe, args, model_name = None):
     """ Converts the UNet component of Stable Diffusion
     """
     if args.unet_support_controlnet:
         unet_name = "control-unet"
     else:
-        unet_name = "unet"
+        unet_name = model_name or "unet"
 
     out_path = _get_out_path(args, unet_name)
 
@@ -674,12 +694,19 @@ def convert_unet(pipe, args):
             raise RuntimeError(
                 "convert_text_encoder() deletes pipe.text_encoder to save RAM. "
                 "Please use convert_unet() before convert_text_encoder()")
+        
+        if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+            text_token_sequence_length = pipe.text_encoder.config.max_position_embeddings
+            hidden_size = pipe.text_encoder.config.hidden_size,
+        elif hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+            text_token_sequence_length = pipe.text_encoder_2.config.max_position_embeddings
+            hidden_size = pipe.text_encoder_2.config.hidden_size,
 
         encoder_hidden_states_shape = (
             batch_size,
-            args.text_encoder_hidden_size or pipe.unet.cross_attention_dim or pipe.text_encoder.config.hidden_size,
+            args.text_encoder_hidden_size or pipe.unet.config.cross_attention_dim or hidden_size,
             1,
-            args.text_token_sequence_length or pipe.text_encoder.config.max_position_embeddings,
+            args.text_token_sequence_length or text_token_sequence_length,
         )
 
         # Create the scheduled timesteps for downstream use
@@ -705,11 +732,28 @@ def convert_unet(pipe, args):
             unet_cls = unet.UNet2DConditionModelXL
 
             # Sample time_ids
-            time_ids = torch.tensor([
-                pipe.vae.sample_size, pipe.vae.sample_size, # output_resolution
-                0., 0., # topleft_crop_cond
-                pipe.vae.sample_size, pipe.vae.sample_size # resolution_cond
-            ] * (batch_size)).to(torch.float32)
+            height = (args.latent_h or pipe.unet.config.sample_size) * 8
+            width = (args.latent_w or pipe.unet.config.sample_size) * 8
+
+            original_size = (height, width) # output_resolution
+            crops_coords_top_left = (0, 0) # topleft_crop_cond
+            target_size = (height, width) # resolution_cond
+            if hasattr(pipe.config, "requires_aesthetics_score") and pipe.config.requires_aesthetics_score:
+                # Part of SDXL's micro-conditioning as explained in section 2.2 of
+                # [https://huggingface.co/papers/2307.01952](https://huggingface.co/papers/2307.01952). Can be used to
+                # simulate an aesthetic score of the generated image by influencing the positive and negative text conditions.
+                aesthetic_score = 6.0 # default aesthetic_score
+                negative_aesthetic_score = 2.5 # default negative_aesthetic_score
+                add_time_ids = list(original_size + crops_coords_top_left + (aesthetic_score,))
+                add_neg_time_ids = list(original_size + crops_coords_top_left + (negative_aesthetic_score,))
+            else:
+                add_time_ids = list(original_size + crops_coords_top_left + target_size)
+                add_neg_time_ids = list(original_size + crops_coords_top_left + target_size)
+
+            time_ids = [
+                add_neg_time_ids,
+                add_time_ids
+            ]
 
             # Pooled text embedding from text_encoder_2
             text_embeds_shape = (
@@ -718,7 +762,7 @@ def convert_unet(pipe, args):
             )
 
             additional_xl_inputs = OrderedDict([
-                ("time_ids", time_ids),
+                ("time_ids", torch.tensor(time_ids).to(torch.float32)),
                 ("text_embeds", torch.rand(*text_embeds_shape)),
             ])
 
@@ -797,6 +841,7 @@ def convert_unet(pipe, args):
             for k, v in sample_unet_inputs.items()
         }
 
+
         coreml_unet, out_path = _convert_to_coreml(unet_name, reference_unet,
                                                    coreml_sample_unet_inputs,
                                                    ["noise_pred"], args)
@@ -805,8 +850,11 @@ def convert_unet(pipe, args):
 
         # Set model metadata
         coreml_unet.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
-        coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
-        coreml_unet.version = args.model_version
+        if args.xl_version:
+            coreml_unet.license = "OpenRAIL++-M (https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md)"
+        else:
+            coreml_unet.license = "OpenRAIL (https://huggingface.co/spaces/CompVis/stable-diffusion-license)"
+        coreml_unet.version = args.model_version if model_name != "refiner" or not hasattr(args, "refiner_version") else args.refiner_version
         coreml_unet.short_description = \
             "Stable Diffusion generates images conditioned on text or other images as input through the diffusion process. " \
             "Please refer to https://arxiv.org/abs/2112.10752 for details."
@@ -820,6 +868,11 @@ def convert_unet(pipe, args):
             "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
             "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. " \
             "Shorter text does not reduce computation."
+        if args.xl_version:
+            coreml_unet.input_description["time_ids"] = \
+                "Additional embeddings that if specified are added to the embeddings that are passed along to the UNet blocks."
+            coreml_unet.input_description["text_embeds"] = \
+                "Additional embeddings from text_encoder_2 that if specified are added to the embeddings that are passed along to the UNet blocks."
 
         # Set the output descriptions
         coreml_unet.output_description["noise_pred"] = \
@@ -849,9 +902,10 @@ def convert_unet(pipe, args):
             f"`unet` already exists at {out_path}, skipping conversion.")
 
     if args.chunk_unet and not unet_chunks_exist:
-        logger.info("Chunking unet in two approximately equal MLModels")
+        logger.info(f"Chunking {model_name} in two approximately equal MLModels")
         args.mlpackage_path = out_path
         args.remove_original = False
+        args.merge_chunks_in_pipeline_model = False
         chunk_mlprogram.main(args)
 
 
@@ -1220,21 +1274,27 @@ def convert_controlnet(pipe, args):
         gc.collect()
 
 def get_pipeline(args):
-    if all(key in args.model_version for key in ['refiner', 'xl']):
-        pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(args.model_version,
-                                                                torch_dtype=torch.float16,
-                                                                variant="fp16",
-                                                                use_safetensors=True,
-                                                                use_auth_token=True)
-    elif 'xl' in args.model_version:
-        pipe = StableDiffusionXLPipeline.from_pretrained(args.model_version,
-                                                       torch_dtype=torch.float16,
-                                                       variant="fp16",
-                                                       use_safetensors=True,
-                                                       use_auth_token=True)
+    model_version = args.model_version
+
+    logger.info(f"Initializing DiffusionPipeline with {model_version}..")
+    if args.custom_vae_version:
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained(args.custom_vae_version, torch_dtype=torch.float16)
+        pipe = DiffusionPipeline.from_pretrained(model_version,
+                                            torch_dtype=torch.float16,
+                                            variant="fp16",
+                                            use_safetensors=True,
+                                            vae=vae,
+                                            use_auth_token=True)
     else:
-        pipe = StableDiffusionPipeline.from_pretrained(args.model_version,
-                                                       use_auth_token=True)
+        pipe = DiffusionPipeline.from_pretrained(model_version,
+                                            torch_dtype=torch.float16,
+                                            variant="fp16",
+                                            use_safetensors=True,
+                                            use_auth_token=True)
+
+    logger.info(f"Done. Pipeline in effect: {pipe.__class__.__name__}")
+
     return pipe
 
 
@@ -1242,10 +1302,7 @@ def main(args):
     os.makedirs(args.o, exist_ok=True)
 
     # Instantiate diffusers pipe as reference
-    logger.info(
-        f"Initializing StableDiffusionPipeline with {args.model_version}..")
     pipe = get_pipeline(args)
-    logger.info("Done.")
 
     # Register the selected attention implementation globally
     unet.ATTENTION_IMPLEMENTATION_IN_EFFECT = unet.AttentionImplementations[
@@ -1275,13 +1332,13 @@ def main(args):
         convert_unet(pipe, args)
         logger.info("Converted unet")
 
-    if args.convert_text_encoder:
+    if args.convert_text_encoder and hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
         logger.info("Converting text_encoder")
         convert_text_encoder(pipe.text_encoder, pipe.tokenizer, "text_encoder", args)
         del pipe.text_encoder
         logger.info("Converted text_encoder")
 
-    if args.convert_text_encoder and args.xl_version:
+    if args.convert_text_encoder and hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
         logger.info("Converting text_encoder_2")
         convert_text_encoder(pipe.text_encoder_2, pipe.tokenizer_2, "text_encoder_2", args)
         del pipe.text_encoder_2
@@ -1291,6 +1348,19 @@ def main(args):
         logger.info("Converting safety_checker")
         convert_safety_checker(pipe, args)
         logger.info("Converted safety_checker")
+
+    if args.convert_unet and args.refiner_version is not None:
+        logger.info(f"Converting refiner")
+        del pipe
+        gc.collect()
+        original_model_version = args.model_version
+        args.model_version = args.refiner_version
+        pipe = get_pipeline(args)
+        args.model_version = original_model_version 
+        convert_unet(pipe, args, model_name="refiner")
+        del pipe
+        gc.collect()
+        logger.info(f"Converted refiner")
 
     if args.quantize_nbits is not None:
         logger.info(f"Quantizing weights to {args.quantize_nbits}-bit precision")
@@ -1327,11 +1397,28 @@ def parser_spec():
         ("The pre-trained model checkpoint and configuration to restore. "
          "For available versions: https://huggingface.co/models?search=stable-diffusion"
          ))
+    parser.add_argument(
+        "--refiner-version",
+        default=None,
+        help=
+        ("The pre-trained refiner model checkpoint and configuration to restore. "
+         "If specified, this argument will convert and bundle the refiner unet only alongside the model unet. "
+         "If you would like to convert a refiner model on it's own, use the --model-version argument instead."
+         "For available versions: https://huggingface.co/models?sort=trending&search=stable-diffusion+refiner"
+         ))
+    parser.add_argument(
+        "--custom-vae-version",
+        type=str,
+        default=None,
+        help=
+        ("Custom VAE checkpoint to override the pipeline's built-in VAE. "
+         "If specified, the specified VAE will be converted instead of the one associated to the `--model-version` checkpoint. "
+         "No precision override is applied when using a custom VAE."
+         ))
     parser.add_argument("--compute-unit",
                         choices=tuple(cu
                                       for cu in ct.ComputeUnit._member_names_),
                         default="ALL")
-
     parser.add_argument(
         "--latent-h",
         type=int,

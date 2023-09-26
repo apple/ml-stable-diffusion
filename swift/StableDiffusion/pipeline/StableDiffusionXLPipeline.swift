@@ -19,11 +19,14 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
     public typealias Progress = PipelineProgress
     
     /// Model to generate embeddings for tokenized input text
-    var textEncoder: TextEncoderXLModel
+    var textEncoder: TextEncoderXLModel?
     var textEncoder2: TextEncoderXLModel
 
     /// Model used to predict noise residuals given an input, diffusion time step, and conditional embedding
     var unet: Unet
+    
+    /// Model used to refine the image, if present
+    var unetRefiner: Unet?
 
     /// Model used to generate final image from latent diffusion process
     var decoder: Decoder
@@ -49,9 +52,10 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
     ///   - reduceMemory: Option to enable reduced memory mode
     /// - Returns: Pipeline ready for image generation
     public init(
-        textEncoder: TextEncoderXLModel,
+        textEncoder: TextEncoderXLModel?,
         textEncoder2: TextEncoderXLModel,
         unet: Unet,
+        unetRefiner: Unet?,
         decoder: Decoder,
         encoder: Encoder?,
         reduceMemory: Bool = false
@@ -59,6 +63,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         self.textEncoder = textEncoder
         self.textEncoder2 = textEncoder2
         self.unet = unet
+        self.unetRefiner = unetRefiner
         self.decoder = decoder
         self.encoder = encoder
         self.reduceMemory = reduceMemory
@@ -72,32 +77,65 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         if reduceMemory {
             try prewarmResources()
         } else {
-            try unet.loadResources()
-            try textEncoder.loadResources()
             try textEncoder2.loadResources()
+            try unet.loadResources()
             try decoder.loadResources()
-            try encoder?.loadResources()
+
+            do {
+                try textEncoder?.loadResources()
+            } catch {
+                print("Error loading resources for textEncoder: \(error)")
+            }
+
+            // Only prewarm refiner unet on load so it's unloaded until needed
+            do {
+                try unetRefiner?.prewarmResources()
+            } catch {
+                print("Error loading resources for unetRefiner: \(error)")
+            }
+
+            do {
+                try encoder?.loadResources()
+            } catch {
+                print("Error loading resources for vae encoder: \(error)")
+            }
         }
     }
 
     /// Unload the underlying resources to free up memory
     public func unloadResources() {
-        textEncoder.unloadResources()
+        textEncoder?.unloadResources()
         textEncoder2.unloadResources()
         unet.unloadResources()
+        unetRefiner?.unloadResources()
         decoder.unloadResources()
         encoder?.unloadResources()
     }
 
-    // Prewarm resources one at a time
+    /// Prewarm resources one at a time
     public func prewarmResources() throws {
-        try textEncoder.prewarmResources()
         try textEncoder2.prewarmResources()
         try unet.prewarmResources()
         try decoder.prewarmResources()
-        try encoder?.prewarmResources()
+
+        do {
+            try textEncoder?.prewarmResources()
+        } catch {
+            print("Error prewarming resources for textEncoder: \(error)")
+        }
+
+        do {
+            try unetRefiner?.prewarmResources()
+        } catch {
+            print("Error prewarming resources for unetRefiner: \(error)")
+        }
+
+        do {
+            try encoder?.prewarmResources()
+        } catch {
+            print("Error prewarming resources for vae encoder: \(error)")
+        }
     }
-    
     /// Image generation using stable diffusion
     /// - Parameters:
     ///   - configuration: Image generation configuration
@@ -109,39 +147,29 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
-        // Encode the input prompt and negative prompt
-        let (promptEmbedding, pooled) = try encodePrompt(config.prompt)
-        let (negativePromptEmbedding, negativePooled) = try encodePrompt(config.negativePrompt)
+        // Determine input type of Unet
+        // SDXL Refiner has a latentTimeIdShape of [2, 5]
+        // SDXL Base has either [12] or [2, 6]
+        let isRefiner = unet.latentTimeIdShape.last == 5
 
-        if reduceMemory {
-            textEncoder.unloadResources()
-            textEncoder2.unloadResources()
+        // Setup geometry conditioning for base/refiner inputs
+        var baseInput: ModelInputs?
+        var refinerInput: ModelInputs?
+
+        // Check if the first textEncoder is available, which is required for base models
+        if textEncoder != nil {
+            baseInput = try generateConditioning(using: config, forRefiner: isRefiner)
         }
 
-        // Convert to Unet hidden state representation
-        // Concatenate the prompt and negative prompt embeddings
-        let concatEmbedding = MLShapedArray<Float32>(
-            concatenating: [negativePromptEmbedding, promptEmbedding],
-            alongAxis: 0
-        )
-        let hiddenStates = toHiddenStates(concatEmbedding)
-        
-        let pooledStates = MLShapedArray<Float32>(
-            concatenating: [negativePooled, pooled],
-            alongAxis: 0
-        )
-        
-        // TODO: expose these to allow experimentation with different values
-        let geometryCond = MLShapedArray<Float32>(
-            arrayLiteral:
-                1024, 1024, // Original size
-                0, 0,       // Top left crop
-                1024, 1024  // Target size
-        )
-        let geometryConditioning = MLShapedArray<Float32>(
-            concatenating: [geometryCond, geometryCond],
-            alongAxis: 0
-        )
+        // Check if the refiner unet exists, or if the current unet is a refiner
+        if unetRefiner != nil || isRefiner {
+            refinerInput = try generateConditioning(using: config, forRefiner: true)
+        }
+
+        if reduceMemory {
+            textEncoder?.unloadResources()
+            textEncoder2.unloadResources()
+        }
 
         /// Setup schedulers
         let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
@@ -160,21 +188,50 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         if reduceMemory {
             encoder?.unloadResources()
         }
-        let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
-        
-        // De-noising loop
-        let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
-        for (step,t) in timeSteps.enumerated() {
 
+        let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
+
+        // Store current model
+        var unetModel = unet
+        var currentInput = baseInput ?? refinerInput
+
+        var unetHiddenStates = currentInput?.hiddenStates
+        var unetPooledStates = currentInput?.pooledStates
+        var unetGeometryConditioning = currentInput?.geometryConditioning
+
+        let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
+
+        // Calculate which step to swap to refiner
+        let refinerStartStep = Int(Float(timeSteps.count) * config.refinerStart)
+
+        // De-noising loop
+        for (step,t) in timeSteps.enumerated() {
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
             let latentUnetInput = latents.map {
                 MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
             }
-                        
+
+            // Switch to refiner if specified
+            if let refiner = unetRefiner, step == refinerStartStep {
+                unet.unloadResources()
+
+                unetModel = refiner
+                currentInput = refinerInput
+                unetHiddenStates = currentInput?.hiddenStates
+                unetPooledStates = currentInput?.pooledStates
+                unetGeometryConditioning = currentInput?.geometryConditioning
+            }
+
+            guard let hiddenStates = unetHiddenStates,
+                  let pooledStates = unetPooledStates,
+                  let geometryConditioning = unetGeometryConditioning else {
+                throw PipelineError.missingUnetInputs
+            }
+
             // Predict noise residuals from latent samples
             // and current time step conditioned on hidden states
-            var noise = try unet.predictNoise(
+            var noise = try unetModel.predictNoise(
                 latents: latentUnetInput,
                 timeStep: t,
                 hiddenStates: hiddenStates,
@@ -213,26 +270,95 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             }
         }
 
+        // Unload resources
         if reduceMemory {
             unet.unloadResources()
         }
+        unetRefiner?.unloadResources()
+
 
         // Decode the latent samples to images
         return try decodeToImages(denoisedLatents, configuration: config)
     }
 
-    func encodePrompt(_ prompt: String) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
-        let (embeds1, _) = try textEncoder.encode(prompt)
-        let (embeds2, pooled) = try textEncoder2.encode(prompt)
-        
-        // Concatenate embeddings
-        // [1, 77, 768], [1, 77, 1280] -> [1, 77, 2048]
-        let embeds = MLShapedArray<Float32>(
-            concatenating: [embeds1, embeds2],
-            alongAxis: 2
-        )
-        
+    func encodePrompt(_ prompt: String, forRefiner: Bool = false) throws -> (MLShapedArray<Float32>, MLShapedArray<Float32>) {
+        var embeds = MLShapedArray<Float32>()
+        var pooled = MLShapedArray<Float32>()
+
+        if forRefiner {
+            let (embeds2, pooledValue) = try textEncoder2.encode(prompt)
+
+            // Refiner only takes textEncoder2 embeddings
+            // [1, 77, 1280]
+            embeds = embeds2
+            pooled = pooledValue
+        } else {
+            guard let encoder = textEncoder else {
+                throw PipelineError.startingText2ImgWithoutTextEncoder
+            }
+            let (embeds1, _) = try encoder.encode(prompt)
+            let (embeds2, pooledValue) = try textEncoder2.encode(prompt)
+
+            // Base needs concatenated embeddings
+            // [1, 77, 768], [1, 77, 1280] -> [1, 77, 2048]
+            embeds = MLShapedArray<Float32>(
+                concatenating: [embeds1, embeds2],
+                alongAxis: 2
+            )
+            pooled = pooledValue
+        }
+
         return (embeds, pooled)
+    }
+
+    func generateConditioning(using config: Configuration, forRefiner: Bool = false) throws -> ModelInputs {
+        // Encode the input prompt and negative prompt
+        let (promptEmbedding, pooled) = try encodePrompt(config.prompt, forRefiner: forRefiner)
+        let (negativePromptEmbedding, negativePooled) = try encodePrompt(config.negativePrompt, forRefiner: forRefiner)
+
+        // Convert to Unet hidden state representation
+        // Concatenate the prompt and negative prompt embeddings
+        let hiddenStates = toHiddenStates(MLShapedArray(concatenating: [negativePromptEmbedding, promptEmbedding], alongAxis: 0))
+        let pooledStates = MLShapedArray(concatenating: [negativePooled, pooled], alongAxis: 0)
+
+        // Inline helper functions for geometry creation
+        func refinerGeometry() -> MLShapedArray<Float32> {
+            let negativeGeometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.negativeAestheticScore
+                ],
+                shape: [1, 5]
+            )
+            let positiveGeometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.aestheticScore
+                ],
+                shape: [1, 5]
+            )
+            return MLShapedArray<Float32>(concatenating: [negativeGeometry, positiveGeometry], alongAxis: 0)
+        }
+
+        func baseGeometry() -> MLShapedArray<Float32> {
+            let geometry = MLShapedArray<Float32>(
+                scalars: [
+                    config.originalSize, config.originalSize,
+                    config.cropsCoordsTopLeft, config.cropsCoordsTopLeft,
+                    config.targetSize, config.targetSize
+                ],
+                // TODO: This checks if the time_ids input is looking for [12] or [2, 6]
+                // Remove once model input shapes are ubiquitous
+                shape: unet.latentTimeIdShape.count > 1 ? [1, 6] : [6]
+            )
+            return MLShapedArray<Float32>(concatenating: [geometry, geometry], alongAxis: 0)
+        }
+
+        let geometry = forRefiner ? refinerGeometry() : baseGeometry()
+
+        return ModelInputs(hiddenStates: hiddenStates, pooledStates: pooledStates, geometryConditioning: geometry)
     }
 
     func generateLatentSamples(configuration config: Configuration, scheduler: Scheduler) throws -> [MLShapedArray<Float32>] {
@@ -265,4 +391,9 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
         return try decoder.decode(latents, scaleFactor: config.decoderScaleFactor)
     }
 
+    struct ModelInputs {
+        var hiddenStates: MLShapedArray<Float32>
+        var pooledStates: MLShapedArray<Float32>
+        var geometryConditioning: MLShapedArray<Float32>
+    }
 }

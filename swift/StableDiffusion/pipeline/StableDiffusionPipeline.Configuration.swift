@@ -20,8 +20,14 @@ public struct PipelineConfiguration: Hashable {
     public var negativePrompt: String = ""
     /// Starting image for image2image or in-painting
     public var startingImage: CGImage? = nil
-    //public var maskImage: CGImage? = nil
+    /// Fraction of inference steps to be used in `.imageToImage` pipeline mode
+    /// Must be between 0 and 1
+    /// Higher values will result in greater transformation of the `startingImage`
     public var strength: Float = 1.0
+    /// Fraction of inference steps to at which to start using the refiner unet if present in `textToImage` mode
+    /// Must be between 0 and 1
+    /// Higher values will result in fewer refiner steps
+    public var refinerStart: Float = 0.8
     /// Number of images to generate
     public var imageCount: Int = 1
     /// Number of inference steps to perform
@@ -44,7 +50,19 @@ public struct PipelineConfiguration: Hashable {
     public var encoderScaleFactor: Float32 = 0.18215
     /// Scale factor to use on the latent before decoding
     public var decoderScaleFactor: Float32 = 0.18215
-    
+    /// If `originalSize` is not the same as `targetSize` the image will appear to be down- or upsampled.
+    /// Part of SDXL’s micro-conditioning as explained in section 2.2 of https://huggingface.co/papers/2307.01952.
+    public var originalSize: Float32 = 1024
+    /// `cropsCoordsTopLeft` can be used to generate an image that appears to be “cropped” from the position `cropsCoordsTopLeft` downwards.
+    /// Favorable, well-centered images are usually achieved by setting `cropsCoordsTopLeft` to (0, 0).
+    public var cropsCoordsTopLeft: Float32 = 0
+    /// For most cases, `target_size` should be set to the desired height and width of the generated image.
+    public var targetSize: Float32 = 1024
+    /// Used to simulate an aesthetic score of the generated image by influencing the positive text condition.
+    public var aestheticScore: Float32 = 6
+    /// Can be used to simulate an aesthetic score of the generated image by influencing the negative text condition.
+    public var negativeAestheticScore: Float32 = 2.5
+
     /// Given the configuration, what mode will be used for generation
     public var mode: PipelineMode {
         guard startingImage != nil else {

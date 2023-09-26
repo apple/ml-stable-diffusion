@@ -4,6 +4,7 @@
 import Foundation
 import Accelerate
 import CoreML
+import CoreGraphics
 
 @available(iOS 16.0, macOS 13.0, *)
 extension CGImage {
@@ -77,7 +78,7 @@ extension CGImage {
             else {
                 throw ShapedArrayError.incorrectFormatsConvertingToShapedArray
             }
-            
+
             var sourceImageBuffer = try vImage_Buffer(cgImage: self)
             
             var mediumDestination = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: mediumFormat.bitsPerPixel)
@@ -88,7 +89,7 @@ extension CGImage {
                 nil,
                 vImage_Flags(kvImagePrintDiagnosticsToConsole),
                 nil)
-            
+
             guard let converter = converter?.takeRetainedValue() else {
                 throw ShapedArrayError.vImageConverterNotInitialized
             }
@@ -99,7 +100,7 @@ extension CGImage {
             var destinationR = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
             var destinationG = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
             var destinationB = try vImage_Buffer(width: Int(width), height: Int(height), bitsPerPixel: 8 * UInt32(MemoryLayout<Float>.size))
-            
+
             var minFloat: [Float] = Array(repeating: minValue, count: 4)
             var maxFloat: [Float] = Array(repeating: maxValue, count: 4)
             
@@ -125,7 +126,56 @@ extension CGImage {
             let imageData = redData + greenData + blueData
 
             let shapedArray = MLShapedArray<Float32>(data: imageData, shape: [1, 3, self.height, self.width])
-            
+
+            return shapedArray
+    }
+
+    private func normalizePixelValues(pixel: UInt8) -> Float {
+        return (Float(pixel) / 127.5) - 1.0
+    }
+
+    public func toRGBShapedArray(minValue: Float, maxValue: Float)
+        throws -> MLShapedArray<Float32> {
+            let image = self
+            let width = image.width
+            let height = image.height
+            let alphaMaskValue: Float = minValue
+
+            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 4 * width, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  let ptr = context.data?.bindMemory(to: UInt8.self, capacity: width * height * 4) else {
+                return []
+            }
+
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+            var redChannel = [Float](repeating: 0, count: width * height)
+            var greenChannel = [Float](repeating: 0, count: width * height)
+            var blueChannel = [Float](repeating: 0, count: width * height)
+
+            for y in 0..<height {
+                for x in 0..<width {
+                    let i = 4 * (y * width + x)
+                    if ptr[i+3] == 0 {
+                        // Alpha mask for controlnets
+                        redChannel[y * width + x] = alphaMaskValue
+                        greenChannel[y * width + x] = alphaMaskValue
+                        blueChannel[y * width + x] = alphaMaskValue
+                    } else {
+                        redChannel[y * width + x] = normalizePixelValues(pixel: ptr[i])
+                        greenChannel[y * width + x] = normalizePixelValues(pixel: ptr[i+1])
+                        blueChannel[y * width + x] = normalizePixelValues(pixel: ptr[i+2])
+                    }
+                }
+            }
+
+            let colorShape = [1, 1, height, width]
+            let redShapedArray = MLShapedArray<Float32>(scalars: redChannel, shape: colorShape)
+            let greenShapedArray = MLShapedArray<Float32>(scalars: greenChannel, shape: colorShape)
+            let blueShapedArray = MLShapedArray<Float32>(scalars: blueChannel, shape: colorShape)
+
+            let shapedArray = MLShapedArray<Float32>(concatenating: [redShapedArray, greenShapedArray, blueShapedArray], alongAxis: 1)
+
             return shapedArray
     }
 }

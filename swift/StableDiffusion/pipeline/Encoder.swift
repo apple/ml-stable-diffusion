@@ -93,7 +93,7 @@ public struct Encoder: ResourceManaging {
     
     var inputDescription: MLFeatureDescription {
         try! model.perform { model in
-            model.modelDescription.inputDescriptionsByName["z"]!
+            model.modelDescription.inputDescriptionsByName.first!.value
         }
     }
     

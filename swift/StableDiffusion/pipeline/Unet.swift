@@ -69,6 +69,17 @@ public struct Unet: ResourceManaging {
         latentSampleDescription.multiArrayConstraint!.shape.map { $0.intValue }
     }
 
+    var latentTimeIdDescription: MLFeatureDescription {
+        try! models.first!.perform { model in
+            model.modelDescription.inputDescriptionsByName["time_ids"]!
+        }
+    }
+
+    /// The expected shape of the geometry conditioning
+    public var latentTimeIdShape: [Int] {
+        latentTimeIdDescription.multiArrayConstraint!.shape.map { $0.intValue }
+    }
+
     /// Batch prediction noise from latent samples
     ///
     /// - Parameters:

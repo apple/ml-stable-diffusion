@@ -113,8 +113,10 @@ struct StableDiffusionSample: ParsableCommand {
         log("Loading resources and creating pipeline\n")
         log("(Note: This can take a while the first time using these resources)\n")
         let pipeline: StableDiffusionPipelineProtocol
+        var scaleFactor: Float32 = 0.18215
         if #available(macOS 14.0, iOS 17.0, *) {
             if isXL {
+                scaleFactor = 0.13025
                 if !controlnet.isEmpty {
                     throw RunError.unsupported("ControlNet is not supported for Stable Diffusion XL")
                 }
@@ -193,22 +195,19 @@ struct StableDiffusionSample: ParsableCommand {
         pipelineConfig.guidanceScale = guidanceScale
         pipelineConfig.schedulerType = scheduler.stableDiffusionScheduler
         pipelineConfig.rngType = rng.stableDiffusionRNG
-
-        if isXL {
-            pipelineConfig.encoderScaleFactor = 0.13025
-            pipelineConfig.decoderScaleFactor = 0.13025
-        }
+        pipelineConfig.useDenoisedIntermediates = true
+        pipelineConfig.encoderScaleFactor = scaleFactor
+        pipelineConfig.decoderScaleFactor = scaleFactor
 
         let images = try pipeline.generateImages(
-            configuration: pipelineConfig,
-            progressHandler: { progress in
+            configuration: pipelineConfig) { progress in
                 sampleTimer.stop()
                 handleProgress(progress,sampleTimer)
                 if progress.stepCount != progress.step {
                     sampleTimer.start()
                 }
                 return true
-            })
+            }
 
         _ = try saveImages(images, logNames: true)
     }
