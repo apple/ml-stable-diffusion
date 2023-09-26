@@ -93,7 +93,20 @@ public struct Encoder: ResourceManaging {
     
     var inputDescription: MLFeatureDescription {
         try! model.perform { model in
-            model.modelDescription.inputDescriptionsByName["z"]!
+            guard let zInputDescription = model.modelDescription.inputDescriptionsByName["z"] else {
+                let modelVersion = model.modelDescription.metadata[MLModelMetadataKey.versionString] ?? "unknown version"
+                fatalError(
+                    """
+                    
+                    The VAE encoder of this model (\(modelVersion)) is not compatible \
+                    with this version of `ml-stable-diffusion`. Please, convert the VAE encoder again using the latest \
+                    version of this package and following the instructions here: \
+                    https://github.com/apple/ml-stable-diffusion#-converting-models-to-core-ml
+                    We'd appreciate if you could then submit the new VAE encoder as a PR to the repo from which this model \
+                    was downloaded.
+                    """)
+            }
+            return zInputDescription
         }
     }
     
