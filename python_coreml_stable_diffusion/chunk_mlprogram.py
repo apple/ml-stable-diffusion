@@ -321,7 +321,7 @@ def main(args):
 
         # Save and reload to ensure CPU placement
         pipeline_model.save(out_path_pipeline)
-        pipeline_model = ct.models.MLModel(out_path_pipeline)
+        pipeline_model = ct.models.MLModel(out_path_pipeline, compute_units=ct.ComputeUnit.CPU_ONLY)
 
         if args.check_output_correctness:
             logger.info("Verifying output correctness of pipeline model")
