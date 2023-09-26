@@ -217,7 +217,7 @@ python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-v
 - `--attention-implementation ORIGINAL` (recommended for `cpuAndGPU`)
 - Due to known float16 overflow issues in the VAE, it runs in float32 precision for now
 
-### Inference
+### Swift Inference
 
 e.g.
 
@@ -229,6 +229,16 @@ swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-dire
 - Only the `base` model is required, `refiner` model is optional and will be used by default if provided in the resource directory
 - ControlNet for XL is not yet supported
 
+### Python Inference
+
+e.g.
+
+```bash
+python -m python_coreml_stable_diffusion.pipeline --prompt “A high quality photo of a surfing dog“ -i <output-mlpackages-directory/Resources> -o <output-dir> --compute-unit CPU_AND_GPU --model-version stabilityai/stable-diffusion-xl-base-1.0
+```
+- refiner is not yet supported
+- ControlNet for XL is not yet supported
+- May point -o to directory with either `.mlpackages` or `.mlcompilec`
 
 </details>
 
