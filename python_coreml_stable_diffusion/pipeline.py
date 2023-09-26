@@ -530,14 +530,14 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             if do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = np.split(noise_pred, 2)
                 noise_pred = noise_pred_uncond + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond)
+                        noise_pred_text - noise_pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.scheduler.step(torch.from_numpy(noise_pred),
                                           t,
                                           torch.from_numpy(latents),
                                           **extra_step_kwargs,
-            ).prev_sample.numpy()
+                                          ).prev_sample.numpy()
 
             # call the callback, if provided
             if callback is not None and i % callback_steps == 0:
@@ -571,7 +571,9 @@ def get_available_schedulers():
         schedulers[scheduler().__class__.__name__.replace("Scheduler", "")] = scheduler
     return schedulers
 
+
 SCHEDULER_MAP = get_available_schedulers()
+
 
 def get_coreml_pipe(pytorch_pipe,
                     mlpackages_dir,
@@ -580,10 +582,14 @@ def get_coreml_pipe(pytorch_pipe,
                     delete_original_pipe=True,
                     scheduler_override=None,
                     controlnet_models=None,
-                    force_zeros_for_empty_prompt=True):
-    """ Initializes and returns a `CoreMLStableDiffusionPipeline` from an original
-    diffusers PyTorch pipeline
+                    force_zeros_for_empty_prompt=True,
+                    sources=None):
     """
+    Initializes and returns a `CoreMLStableDiffusionPipeline` from an original
+    diffusers PyTorch pipeline
+        sources: 'packages' or 'compiled' forces creation of model from specified sources. sources must be in mlpackages_dir
+    """
+
     # Ensure `scheduler_override` object is of correct type if specified
     if scheduler_override is not None:
         assert isinstance(scheduler_override, SchedulerMixin)
@@ -601,17 +607,18 @@ def get_coreml_pipe(pytorch_pipe,
             'xl': True
         }
 
-        model_names_to_load = ["text_encoder", "text_encoder_2", "unet", "vae_decoder"]
+        model_packages_to_load = ["text_encoder", "text_encoder_2", "unet", "vae_decoder"]
+
     else:
         coreml_pipe_kwargs = {
             "tokenizer": pytorch_pipe.tokenizer,
             "scheduler": pytorch_pipe.scheduler if scheduler_override is None else scheduler_override,
             "feature_extractor": pytorch_pipe.feature_extractor,
         }
-        model_names_to_load = ["text_encoder", "unet", "vae_decoder"]
+        model_packages_to_load = ["text_encoder", "unet", "vae_decoder"]
 
     if getattr(pytorch_pipe, "safety_checker", None) is not None:
-        model_names_to_load.append("safety_checker")
+        model_packages_to_load.append("safety_checker")
     else:
         logger.warning(
             f"Original diffusers pipeline for {model_version} does not have a safety_checker, "
@@ -624,12 +631,12 @@ def get_coreml_pipe(pytorch_pipe,
         logger.info("Removed PyTorch pipe to reduce peak memory consumption")
 
     if controlnet_models:
-        model_names_to_load.remove("unet")
+        model_packages_to_load.remove("unet")
         coreml_pipe_kwargs["unet"] = _load_mlpackage(
-            "control-unet",
-            mlpackages_dir,
-            model_version,
-            compute_unit,
+            submodule_name="control-unet",
+            mlpackages_dir=mlpackages_dir,
+            model_version=model_version,
+            compute_unit=compute_unit,
         )
         coreml_pipe_kwargs["controlnet"] = [_load_mlpackage_controlnet(
             mlpackages_dir,
@@ -643,12 +650,13 @@ def get_coreml_pipe(pytorch_pipe,
     logger.info(f"Loading Core ML models in memory from {mlpackages_dir}")
     coreml_pipe_kwargs.update({
         model_name: _load_mlpackage(
-            model_name,
-            mlpackages_dir,
-            model_version,
-            compute_unit,
+            submodule_name=model_name,
+            mlpackages_dir=mlpackages_dir,
+            model_version=model_version,
+            compute_unit=compute_unit,
+            sources=sources,
         )
-        for model_name in model_names_to_load
+        for model_name in model_packages_to_load
     })
     logger.info("Done.")
 
@@ -675,11 +683,13 @@ def get_image_path(args, **override_kwargs):
 
     return os.path.join(out_folder, out_fname + ".png")
 
+
 def prepare_controlnet_cond(image_path, height, width):
     image = Image.open(image_path).convert("RGB")
     image = image.resize((height, width), resample=Image.LANCZOS)
     image = np.array(image).transpose(2, 0, 1) / 255.0
     return image
+
 
 def main(args):
     logger.info(f"Setting random seed to {args.seed}")
@@ -687,13 +697,12 @@ def main(args):
 
     logger.info("Initializing PyTorch pipe for reference configuration")
 
-    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
+    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
     SDP = StableDiffusionXLPipeline if 'xl' in args.model_version else StableDiffusionPipeline
 
     pytorch_pipe = SDP.from_pretrained(
         args.model_version,
         use_auth_token=True,
-        local_files_only=True
     )
 
     # Get Scheduler
@@ -707,7 +716,6 @@ def main(args):
     if 'force_zeros_for_empty_prompt' in pytorch_pipe.config:
         force_zeros_for_empty_prompt = pytorch_pipe.config['force_zeros_for_empty_prompt']
 
-
     coreml_pipe = get_coreml_pipe(
         pytorch_pipe=pytorch_pipe,
         mlpackages_dir=args.i,
@@ -715,7 +723,8 @@ def main(args):
         compute_unit=args.compute_unit,
         scheduler_override=user_specified_scheduler,
         controlnet_models=args.controlnet,
-        force_zeros_for_empty_prompt=force_zeros_for_empty_prompt
+        force_zeros_for_empty_prompt=force_zeros_for_empty_prompt,
+        sources=args.model_sources,
     )
 
     if args.controlnet:
@@ -779,7 +788,7 @@ if __name__ == "__main__":
         choices=tuple(SCHEDULER_MAP.keys()),
         default=None,
         help=("The scheduler to use for running the reverse diffusion process. "
-             "If not specified, the default scheduler from the diffusers pipeline is utilized"))
+              "If not specified, the default scheduler from the diffusers pipeline is utilized"))
     parser.add_argument(
         "--num-inference-steps",
         default=50,
@@ -795,17 +804,21 @@ if __name__ == "__main__":
         nargs="*",
         type=str,
         help=("Enables ControlNet and use control-unet instead of unet for additional inputs. "
-            "For Multi-Controlnet, provide the model names separated by spaces."))
+              "For Multi-Controlnet, provide the model names separated by spaces."))
     parser.add_argument(
         "--controlnet-inputs",
         nargs="*",
         type=str,
         help=("Image paths for ControlNet inputs. "
-            "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
+              "Please enter images corresponding to each controlnet provided at --controlnet option in same order."))
     parser.add_argument(
         "--negative-prompt",
         default=None,
         help="The negative text prompt to be used for text-to-image generation.")
+    parser.add_argument('--model-sources',
+                        default=None,
+                        choices=['packages', 'compiled'],
+                        help='Force build from `packages` or `compiled`')
 
     args = parser.parse_args()
     main(args)
