@@ -4,6 +4,13 @@
 import Accelerate
 import CoreML
 
+/// How to space timesteps for inference
+@available(iOS 16.2, macOS 13.1, *)
+public enum TimeStepSpacing {
+    case linspace
+    case leading
+}
+
 /// A scheduler used to compute a de-noised image
 ///
 ///  This implementation matches:
@@ -47,13 +54,15 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     ///   - betaSchedule: Method to schedule betas from betaStart to betaEnd
     ///   - betaStart: The starting value of beta for inference
     ///   - betaEnd: The end value for beta for inference
+    ///   - timeStepSpacing: How to space time steps
     /// - Returns: A scheduler ready for its first step
     public init(
         stepCount: Int = 50,
         trainStepCount: Int = 1000,
         betaSchedule: BetaSchedule = .scaledLinear,
         betaStart: Float = 0.00085,
-        betaEnd: Float = 0.012
+        betaEnd: Float = 0.012,
+        timeStepSpacing: TimeStepSpacing = .linspace
     ) {
         self.trainStepCount = trainStepCount
         self.inferenceStepCount = stepCount
@@ -72,12 +81,19 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         }
         self.alphasCumProd = alphasCumProd
 
-        // Currently we only support VP-type noise shedule
+        switch timeStepSpacing {
+        case .linspace:
+            self.timeSteps = linspace(0, Float(self.trainStepCount-1), stepCount+1).dropFirst().reversed().map { Int(round($0)) }
+        case .leading:
+            let lastTimeStep = trainStepCount - 1
+            let stepRatio = lastTimeStep / (stepCount + 1)
+            // Creates integer timesteps by multiplying by ratio
+            self.timeSteps = (0...stepCount).map { 1 + $0 * stepRatio }.dropFirst().reversed()
+        }
+
         self.alpha_t = vForce.sqrt(self.alphasCumProd)
         self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
         self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
-
-        self.timeSteps = linspace(0, Float(self.trainStepCount-1), stepCount+1).dropFirst().reversed().map { Int(round($0)) }
     }
     
     /// Convert the model output to the corresponding type the algorithm needs.
