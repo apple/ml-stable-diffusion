@@ -13,6 +13,8 @@ public enum StableDiffusionScheduler {
     case pndmScheduler
     /// Scheduler that uses a second order DPM-Solver++ algorithm
     case dpmSolverMultistepScheduler
+    /// Scheduler that uses an Euler Ancestral discrete algorithm
+    case eulerAncestralDiscreteScheduler
 }
 
 /// RNG compatible with StableDiffusionPipeline
@@ -229,6 +231,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             switch config.schedulerType {
             case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount)
+            case .eulerAncestralDiscreteScheduler: return EulerAncestralDiscreteScheduler(randomSource: randomSource(from: config.rngType, seed: config.seed), stepCount: config.stepCount)
             }
         }
 
