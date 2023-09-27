@@ -5,7 +5,6 @@ import Accelerate
 import CoreML
 
 /// How to space timesteps for inference
-@available(iOS 16.2, macOS 13.1, *)
 public enum TimeStepSpacing {
     case linspace
     case leading
