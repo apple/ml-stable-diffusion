@@ -4,6 +4,13 @@
 import Accelerate
 import CoreML
 
+/// How to space timesteps for inference
+public enum TimeStepSpacing {
+    case linspace
+    case leading
+    case karras
+}
+
 /// A scheduler used to compute a de-noised image
 ///
 ///  This implementation matches:
@@ -32,6 +39,8 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     public let solverOrder = 2
     private(set) var lowerOrderStepped = 0
     
+    private var usingKarrasSigmas = false
+
     /// Whether to use lower-order solvers in the final steps. Only valid for less than 15 inference steps.
     /// We empirically find this trick can stabilize the sampling of DPM-Solver, especially with 10 or fewer steps.
     public let useLowerOrderFinal = true
@@ -47,13 +56,15 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     ///   - betaSchedule: Method to schedule betas from betaStart to betaEnd
     ///   - betaStart: The starting value of beta for inference
     ///   - betaEnd: The end value for beta for inference
+    ///   - timeStepSpacing: How to space time steps
     /// - Returns: A scheduler ready for its first step
     public init(
         stepCount: Int = 50,
         trainStepCount: Int = 1000,
         betaSchedule: BetaSchedule = .scaledLinear,
         betaStart: Float = 0.00085,
-        betaEnd: Float = 0.012
+        betaEnd: Float = 0.012,
+        timeStepSpacing: TimeStepSpacing = .linspace
     ) {
         self.trainStepCount = trainStepCount
         self.inferenceStepCount = stepCount
@@ -72,12 +83,51 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         }
         self.alphasCumProd = alphasCumProd
 
-        // Currently we only support VP-type noise shedule
-        self.alpha_t = vForce.sqrt(self.alphasCumProd)
-        self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
-        self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
+        switch timeStepSpacing {
+        case .linspace:
+            self.timeSteps = linspace(0, Float(self.trainStepCount-1), stepCount+1).dropFirst().reversed().map { Int(round($0)) }
+            self.alpha_t = vForce.sqrt(self.alphasCumProd)
+            self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
+        case .leading:
+            let lastTimeStep = trainStepCount - 1
+            let stepRatio = lastTimeStep / (stepCount + 1)
+            // Creates integer timesteps by multiplying by ratio
+            self.timeSteps = (0...stepCount).map { 1 + $0 * stepRatio }.dropFirst().reversed()
+            self.alpha_t = vForce.sqrt(self.alphasCumProd)
+            self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
+        case .karras:
+            // sigmas = np.array(((1 - self.alphas_cumprod) / self.alphas_cumprod) ** 0.5)
+            let scaled = vDSP.multiply(
+                subtraction: ([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd),
+                subtraction: (vDSP.divide(1, self.alphasCumProd), [Float](repeating: 0, count: self.alphasCumProd.count))
+            )
+            let sigmas = vForce.sqrt(scaled)
+            let logSigmas = sigmas.map { log($0) }
 
-        self.timeSteps = linspace(0, Float(self.trainStepCount-1), stepCount+1).dropFirst().reversed().map { Int(round($0)) }
+            let sigmaMin = sigmas.first!
+            let sigmaMax = sigmas.last!
+            let rho: Float = 7
+            let ramp = linspace(0, 1, stepCount)
+            let minInvRho = pow(sigmaMin, (1 / rho))
+            let maxInvRho = pow(sigmaMax, (1 / rho))
+
+            var karrasSigmas = ramp.map { pow(maxInvRho + $0 * (minInvRho - maxInvRho), rho) }
+            let karrasTimeSteps = karrasSigmas.map { sigmaToTimestep(sigma: $0, logSigmas: logSigmas) }
+            self.timeSteps = karrasTimeSteps
+
+            karrasSigmas.append(karrasSigmas.last!)
+
+            self.alpha_t = vDSP.divide(1, vForce.sqrt(vDSP.add(1, vDSP.square(karrasSigmas))))
+            self.sigma_t = vDSP.multiply(karrasSigmas, self.alpha_t)
+            usingKarrasSigmas = true
+        }
+
+        self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
+    }
+    
+    func timestepToIndex(_ timestep: Int) -> Int {
+        guard usingKarrasSigmas else { return timestep }
+        return self.timeSteps.firstIndex(of: timestep) ?? 0
     }
     
     /// Convert the model output to the corresponding type the algorithm needs.
@@ -85,7 +135,8 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     func convertModelOutput(modelOutput: MLShapedArray<Float32>, timestep: Int, sample: MLShapedArray<Float32>) -> MLShapedArray<Float32> {
         assert(modelOutput.scalarCount == sample.scalarCount)
         let scalarCount = modelOutput.scalarCount
-        let (alpha_t, sigma_t) = (self.alpha_t[timestep], self.sigma_t[timestep])
+        let sigmaIndex = timestepToIndex(timestep)
+        let (alpha_t, sigma_t) = (self.alpha_t[sigmaIndex], self.sigma_t[sigmaIndex])
 
         return MLShapedArray(unsafeUninitializedShape: modelOutput.shape) { scalars, _ in
             assert(scalars.count == scalarCount)
@@ -108,9 +159,11 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         prevTimestep: Int,
         sample: MLShapedArray<Float32>
     ) -> MLShapedArray<Float32> {
-        let (p_lambda_t, lambda_s) = (Double(lambda_t[prevTimestep]), Double(lambda_t[timestep]))
-        let p_alpha_t = Double(alpha_t[prevTimestep])
-        let (p_sigma_t, sigma_s) = (Double(sigma_t[prevTimestep]), Double(sigma_t[timestep]))
+        let prevIndex = timestepToIndex(prevTimestep)
+        let currIndex = timestepToIndex(timestep)
+        let (p_lambda_t, lambda_s) = (Double(lambda_t[prevIndex]), Double(lambda_t[currIndex]))
+        let p_alpha_t = Double(alpha_t[prevIndex])
+        let (p_sigma_t, sigma_s) = (Double(sigma_t[prevIndex]), Double(sigma_t[currIndex]))
         let h = p_lambda_t - lambda_s
         // x_t = (sigma_t / sigma_s) * sample - (alpha_t * (torch.exp(-h) - 1.0)) * model_output
         let x_t = weightedSum(
@@ -130,9 +183,13 @@ public final class DPMSolverMultistepScheduler: Scheduler {
     ) -> MLShapedArray<Float32> {
         let (s0, s1) = (timesteps[back: 1], timesteps[back: 2])
         let (m0, m1) = (modelOutputs[back: 1], modelOutputs[back: 2])
-        let (p_lambda_t, lambda_s0, lambda_s1) = (Double(lambda_t[t]), Double(lambda_t[s0]), Double(lambda_t[s1]))
-        let p_alpha_t = Double(alpha_t[t])
-        let (p_sigma_t, sigma_s0) = (Double(sigma_t[t]), Double(sigma_t[s0]))
+        let (p_lambda_t, lambda_s0, lambda_s1) = (
+            Double(lambda_t[timestepToIndex(t)]),
+            Double(lambda_t[timestepToIndex(s0)]),
+            Double(lambda_t[timestepToIndex(s1)])
+        )
+        let p_alpha_t = Double(alpha_t[timestepToIndex(t)])
+        let (p_sigma_t, sigma_s0) = (Double(sigma_t[timestepToIndex(t)]), Double(sigma_t[timestepToIndex(s0)]))
         let (h, h_0) = (p_lambda_t - lambda_s0, lambda_s0 - lambda_s1)
         let r0 = h_0 / h
         let D0 = m0
@@ -184,5 +241,33 @@ public final class DPMSolverMultistepScheduler: Scheduler {
         }
         
         return prevSample
+    }
+}
+
+func sigmaToTimestep(sigma: Float, logSigmas: [Float]) -> Int {
+    let logSigma = log(sigma)
+    let dists = logSigmas.map { logSigma - $0 }
+
+    // last index that is not negative, clipped to last index - 1
+    var lowIndex = dists.reduce(-1) { partialResult, dist in
+        return dist >= 0 && partialResult < dists.endIndex-2 ? partialResult + 1 : partialResult
+    }
+    lowIndex = max(lowIndex, 0)
+    let highIndex = lowIndex + 1
+
+    let low = logSigmas[lowIndex]
+    let high = logSigmas[highIndex]
+
+    // Interpolate sigmas
+    let w = ((low - logSigma) / (low - high)).clipped(to: 0...1)
+
+    // transform interpolated value to time range
+    let t = (1 - w) * Float(lowIndex) + w * Float(highIndex)
+    return Int(round(t))
+}
+
+extension FloatingPoint {
+    func clipped(to range: ClosedRange<Self>) -> Self {
+        return min(max(self, range.lowerBound), range.upperBound)
     }
 }

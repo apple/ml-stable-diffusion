@@ -44,6 +44,8 @@ public struct PipelineConfiguration: Hashable {
     public var useDenoisedIntermediates: Bool = false
     /// The type of Scheduler to use.
     public var schedulerType: StableDiffusionScheduler = .pndmScheduler
+    /// The spacing to use for scheduler sigmas and time steps. Only supported when using `.dpmppScheduler`.
+    public var schedulerTimestepSpacing: TimeStepSpacing = .linspace
     /// The type of RNG to use
     public var rngType: StableDiffusionRNG = .numpyRNG
     /// Scale factor to use on the latent after encoding
