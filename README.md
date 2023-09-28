@@ -97,6 +97,7 @@ Target Device Hardware Generation:
 
 |        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
 | --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
+| iPhone 12 Pro         | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            116*        |        0.50              |
 | iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            86*         |        0.68              |
 | iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            77*         |        0.83              |
 | iPhone 15 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            31          |        0.85              |
