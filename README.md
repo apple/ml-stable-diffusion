@@ -16,6 +16,9 @@ If you run into issues during installation or runtime, please refer to the [FAQ]
 
 ## <a name="system-requirements"></a> System Requirements
 
+<details>
+  <summary> Details (Click to expand) </summary>
+
 Model Conversion:
 
  macOS  | Python | coremltools |
@@ -34,7 +37,7 @@ Target Device Runtime:
 :------:|:-----------:|
   13.1  |     16.2    |
 
-Target Device Runtime ([With Memory Improvements](#compression)):
+Target Device Runtime ([With Memory Improvements](#compression-6-bits-and-higher)):
 
   macOS | iPadOS, iOS |
 :------:|:-----------:|
@@ -46,18 +49,24 @@ Target Device Hardware Generation:
 :------:|:-------:|:-------:|
    M1   |   M1    |  A14    |
 
+</details>
+
 
 ## <a name="performance-benchmark"></a> Performance Benchmarks
 
+<details>
+  <summary> Details (Click to expand) </summary>
 
-[`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base) Benchmark:
+
+[`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base) (512x512)
+
 
 
 |        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
 | --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
-| iPhone 12 Mini        | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      18.5              |        1.44              |
+| iPhone 12 Mini        | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      18.5*             |        1.44              |
 | iPhone 12 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      15.4              |        1.45              |
-| iPhone 13             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      10.8              |        2.53              |
+| iPhone 13             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      10.8*             |        2.53              |
 | iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      10.4              |        2.55              |
 | iPhone 14             | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      8.6               |        2.57              |
 | iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM_V2`       |      7.9               |        2.69              |
@@ -67,15 +76,15 @@ Target Device Hardware Generation:
 <details>
   <summary> Details (Click to expand) </summary>
 
-- This benchmark was conducted by Apple using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 Seed 8 in August 2023.
-- The performance data was collected by running the `StableDiffusion` Swift pipeline.
+- This benchmark was conducted by Apple and Hugging Face using public beta versions of iOS 17.0, iPadOS 17.0 and macOS 14.0 Seed 8 in August 2023.
+- The performance data was collected using the `benchmark` branch of the [Diffusers app](https://github.com/huggingface/swift-coreml-diffusers)
 - Swift code is not fully optimized, introducing up to ~10% overhead unrelated to Core ML model execution.
 - The median latency value across 5 back-to-back end-to-end executions are reported
 - The image generation procedure follows the standard configuration: 20 inference steps, 512x512 output image resolution, 77 text token sequence length, classifier-free guidance (batch size of 2 for unet).
 - The actual prompt length does not impact performance because the Core ML model is converted with a static shape that computes the forward pass for all of the 77 elements (`tokenizer.model_max_length`) in the text token sequence regardless of the actual length of the input text.
-- Weights are compressed to 6 bit precision. Please refer to [this section](#compression) for details.
+- Weights are compressed to 6 bit precision. Please refer to [this section](#compression-6-bits-and-higher) for details.
 - Activations are in float16 precision for both the GPU and the Neural Engine.
-- For iPhone 12 mini and iPhone 13, we enable the [reduceMemory](https://github.com/apple/ml-stable-diffusion/blob/main/swift/StableDiffusion/pipeline/StableDiffusionPipeline.swift#L65) option to load and unload models just-in-time to avoid memory issues. This added up to 2 seconds to the end-to-end latency.
+- `*` indicates that the [reduceMemory](https://github.com/apple/ml-stable-diffusion/blob/main/swift/StableDiffusion/pipeline/StableDiffusionPipeline.swift#L91) option was enabled which loads and unloads models just-in-time to avoid memory shortage. This added up to 2 seconds to the end-to-end latency.
 - In the benchmark table, we report the best performing `--compute-unit` and `--attention-implementation` values per device. The former does not modify the Core ML model and can be applied during runtime. The latter modifies the Core ML model. Note that the best performing compute unit is model version and hardware-specific.
 - Note that the performance optimizations in this repository (e.g. `--attention-implementation`) are generally applicable to Transformers and not customized to Stable Diffusion. Better performance may be observed upon custom kernel tuning. Therefore, these numbers do not represent **peak** HW capability.
 - Performance may vary across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
@@ -83,7 +92,41 @@ Target Device Hardware Generation:
 
 </details>
 
-[`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base) Benchmark:
+
+[`stabilityai/stable-diffusion-xl-base-1.0-ios`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base-ios) (768x768)
+
+|        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
+| --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
+| iPhone 13 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            86*         |        0.68              |
+| iPhone 14 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            77*         |        0.83              |
+| iPhone 15 Pro Max     | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            31          |        0.85              |
+| iPad Pro (M1)         | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            36          |        0.69              |
+| iPad Pro (M2)         | `CPU_AND_NE`    |      `SPLIT_EINSUM`          |            27          |        0.98              |
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+- This benchmark was conducted by Apple and Hugging Face using iOS 17.0.2 and iPadOS 17.0.2 in September 2023.
+- The performance data was collected using the `benchmark` branch of the [Diffusers app](https://github.com/huggingface/swift-coreml-diffusers)
+- The median latency value across 5 back-to-back end-to-end executions are reported
+- The image generation procedure follows this configuration: 20 inference steps, 768x768 output image resolution, 77 text token sequence length, classifier-free guidance (batch size of 2 for unet).
+- `Unet.mlmodelc` is compressed to 4.04 bit precision following the [Mixed-Bit Palettization](#compression-lower-than-6-bits) algorithm recipe published [here](https://huggingface.co/apple/coreml-stable-diffusion-mixed-bit-palettization/blob/main/recipes/stabilityai-stable-diffusion-xl-base-1.0_palettization_recipe.json)
+- All models except for `Unet.mlmodelc` are compressed to 16 bit precision
+- [madebyollin/sdxl-vae-fp16-fix](https://huggingface.co/madebyollin/sdxl-vae-fp16-fix) by [@madebyollin](https://github.com/madebyollin) was used as the source PyTorch model for `VAEDecoder.mlmodelc` in order to enable float16 weight and activation quantization for the VAE model.
+- `--attention-implementation SPLIT_EINSUM` is chosen in lieu of `SPLIT_EINSUM_V2` due to the prohibitively long compilation time of the latter
+- `*` indicates that the [reduceMemory](https://github.com/apple/ml-stable-diffusion/blob/main/swift/StableDiffusion/pipeline/StableDiffusionPipeline.swift#L91) option was enabled which loads and unloads models just-in-time to avoid memory shortage. This added significant overhead to the end-to-end latency. Note that end-to-end latency difference between `iPad Pro (M1)` and `iPhone 13 Pro Max` despite identical diffusion speed.
+- The actual prompt length does not impact performance because the Core ML model is converted with a static shape that computes the forward pass for all of the 77 elements (`tokenizer.model_max_length`) in the text token sequence regardless of the actual length of the input text.
+- In the benchmark table, we report the best performing `--compute-unit` and `--attention-implementation` values per device. The former does not modify the Core ML model and can be applied during runtime. The latter modifies the Core ML model. Note that the best performing compute unit is model version and hardware-specific.
+- Note that the performance optimizations in this repository (e.g. `--attention-implementation`) are generally applicable to Transformers and not customized to Stable Diffusion. Better performance may be observed upon custom kernel tuning. Therefore, these numbers do not represent **peak** HW capability.
+- Performance may vary across different versions of Stable Diffusion due to architecture changes in the model itself. Each reported number is specific to the model version mentioned in that context.
+- Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state.
+
+
+</details>
+
+
+
+[`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base) (1024x1024)
 
 |        Device         | `--compute-unit`| `--attention-implementation` | End-to-End Latency (s) | Diffusion Speed (iter/s) |
 | --------------------- | --------------- | ---------------------------- | ---------------------- | ------------------------ |
@@ -104,8 +147,10 @@ Target Device Hardware Generation:
 - Performance may vary due to factors like increased system load from other applications or suboptimal device thermal state. Given these factors, we do not report sub-second variance in latency.
 
 </details>
+</details>
 
-## <a name="compression"></a> Weight Compression
+
+## <a name="compression-6-bits-and-higher"></a> Weight Compression (6-bits and higher)
 
 <details>
   <summary> Details (Click to expand) </summary>
@@ -124,7 +169,7 @@ The Neural Engine is capable of accelerating models with low-bit palettization: 
 | 16-bit           | cpuAndNeuralEngine | <img src="assets/float16_cpuandne_readmereel.png">  |
 | 16-bit           | cpuAndGPU          | <img src="assets/float16_gpu_readmereel.png"> |
 
-Note that there are minor differences across 16-bit (float16) and 6-bit results. These differences are comparable to the differences across float16 and float32 or differences across compute units as exemplified above. We recommend a minimum of 6 bits for palettizing Stable Diffusion. Smaller number of bits (1, 2 and 4) will require either fine-tuning or advanced palettization techniques such as [MBP](#mbp).
+Note that there are minor differences across 16-bit (float16) and 6-bit results. These differences are comparable to the differences across float16 and float32 or differences across compute units as exemplified above. We recommend a minimum of 6 bits for palettizing Stable Diffusion. Smaller number of bits (1, 2 and 4) will require either fine-tuning or advanced palettization techniques such as [MBP](#compression-lower-than-6-bits).
 
 Resources:
 - [Core ML Tools Docs: Optimizing Models](https://coremltools.readme.io/v7.0/docs/optimizing-models)
@@ -132,24 +177,25 @@ Resources:
 
 </details>
 
-## <a name="mbp"></a> MBP: Post-Training Mixed-Bit Palettization
+## <a name="compression-lower-than-6-bits"></a> Advanced Weight Compression (Lower than 6-bits)
 
 <details>
   <summary> Details (Click to expand) </summary>
 
+This section describes an advanced compression algorithm called [Mixed-Bit Palettization (MBP)](https://huggingface.co/blog/stable-diffusion-xl-coreml#what-is-mixed-bit-palettization) built on top of the [Post-Training Weight Palettization tools from coremltools-7.0](https://apple.github.io/coremltools/docs-guides/source/post-training-palettization.html).
+
+MBP builds a per-layer "palettization recipe" by picking a suitable number of bits among the Neural Engine supported bit-widths of 1, 2, 4, 6 and 8 in order to achieve the minimum average bit-width while maintaining a desired level of signal strength. The signal strength is measured by comparing the compressed model's output to that of the original float16 model. Given the same random seed and text prompts, PSNR between denoised latents is computed. The compression rate will depend on the model version as well as the tolerance for signal loss (drop in PSNR) since this algorithm is adaptive.
 
 | 3.41-bit | 4.50-bit | 6.55-bit | 16-bit (original) |
 | :-------:| :-------:| :-------:| :----------------:|
 | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_3.41-bits.png"> | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_4.50-bits.png">  | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_6.55-bits.png"> | <img src="assets/mbp/a_high_quality_photo_of_a_surfing_dog.7667.final_float16_original.png"> |
 
 
-This is an advanced compression technique that picks a suitable number of bits (among 1, 2, 4, 6 and 8) in order to achieve the desired signal strength as measured by end-to-end PSNR. The compression rate depends on the model version as well as the tolerance for signal loss (drop in PSNR).
-
 For example, the original float16 [stabilityai/stable-diffusion-xl-base-1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) model has an ~82 dB signal strength. Naively applying [linear 8-bit quantization](https://coremltools.readme.io/docs/data-free-quantization) to the Unet model drops the signal to ~65 dB. Instead, applying MBP yields an average of 2.81-bits quantization while maintaining a signal strength of ~67 dB. This technique generally yields better results compared to using `--quantize-nbits` during model conversion but requires a "pre-analysis" run that takes up to a few hours on a single GPU (`mps` or `cuda`).
 
 Here is the signal strength (PSNR in dB) versus model size reduction (% of float16 size) for `stabilityai/stable-diffusion-xl-base-1.0`. The `{1,2,4,6,8}-bit` curves are generated by progresssively palettizing more layers using a palette with fixed number of bits. The layers were ordered in ascending order of their isolated impact to end-to-end signal strength so the cumulative compression's impact is delayed as much as possible. The mixed-bit curve is based on falling back to a higher number of bits as soon as a layer's isolated impact to end-to-end signal integrity drops below a threshold. Note that all curves based on palettization outperform linear 8-bit quantization at the same model size except for 1-bit.
 
-<img src="assets/mbp/stabilityai_stable-diffusion-xl-base-1.0_psnr_vs_size.png">
+<img src="assets/mbp/stabilityai_stable-diffusion-xl-base-1.0_psnr_vs_size.png" width="640">
 
 Here are the steps for applying this technique on another model version:
 
@@ -209,30 +255,39 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 e.g.:
 
 ```bash
-python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-vae-decoder --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --refiner-version stabilityai/stable-diffusion-xl-refiner-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
+python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --convert-vae-decoder --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --refiner-version stabilityai/stable-diffusion-xl-refiner-1.0 --bundle-resources-for-swift-cli --attention-implementation {ORIGINAL,SPLIT_EINSUM} -o <output-dir>
 ```
 
 - `--xl-version`: Additional argument to pass to the conversion script when specifying an XL model
 - `--refiner-version`: Additional argument to pass to the conversion script when specifying an XL refiner model, required for ["Ensemble of Expert Denoisers"](https://huggingface.co/docs/diffusers/main/en/api/pipelines/stable_diffusion/stable_diffusion_xl#1-ensemble-of-expert-denoisers) inference.
-- `--attention-implementation ORIGINAL` (recommended for `cpuAndGPU`)
-- Due to known float16 overflow issues in the VAE, it runs in float32 precision for now
+- `--attention-implementation`: `ORIGINAL` is recommended for `cpuAndGPU` for deployment on Mac
+- `--attention-implementation`: `SPLIT_EINSUM` is recommended for `cpuAndNeuralEngine` for deployment on iPhone & iPad
+- `--attention-implementation`: `SPLIT_EINSUM_V2` is not recommended for Stable Diffusion XL because of prohibitively long compilation time
+- **Tip:** Adding `--latent-h 96 --latent-w 96` is recommended for iOS and iPadOS deployment which leads to 768x768 generation as opposed to the default 1024x1024.
+- **Tip:** Due to known float16 overflow issues in the original Stable Diffusion XL VAE, [the model conversion script enforces float32 precision](https://github.com/apple/ml-stable-diffusion/blob/main/python_coreml_stable_diffusion/torch2coreml.py#L486). Using a custom VAE version such as [madebyollin/sdxl-vae-fp16-fix](https://huggingface.co/madebyollin/sdxl-vae-fp16-fix) by [@madebyollin](https://github.com/madebyollin) via `--custom-vae-version madebyollin/sdxl-vae-fp16-fix` will restore the default float16 precision for VAE.
 
-### Inference
-
-e.g.
+### Swift Inference
 
 ```bash
-swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units cpuAndGPU --xl
+swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units {cpuAndGPU,cpuAndNeuralEngine} --xl
 ```
-
-- Only `--compute-units cpuAndGPU` is supported for now
 - Only the `base` model is required, `refiner` model is optional and will be used by default if provided in the resource directory
 - ControlNet for XL is not yet supported
 
+### Python Inference
+
+```bash
+python -m python_coreml_stable_diffusion.pipeline --prompt <prompt> --compute-unit {CPU_AND_GPU,CPU_AND_NE} -o <output-dir> -i <output-mlpackages-directory/Resources> --model-version stabilityai/stable-diffusion-xl-base-1.0
+```
+- `refiner` model is not yet supported
+- ControlNet for XL is not yet supported
 
 </details>
 
 ## <a name="using-controlnet"></a> Using ControlNet
+
+<details>
+  <summary> Details (Click to expand) </summary>
 
 Example results using the prompt *"a high quality photo of a surfing dog"* conditioned on the scribble (leftmost):
 
@@ -240,6 +295,9 @@ Example results using the prompt *"a high quality photo of a surfing dog"* condi
 
 [ControlNet](https://huggingface.co/lllyasviel/ControlNet) allows users to condition image generation with Stable Diffusion on signals such as edge maps, depth maps, segmentation maps, scribbles and pose. Thanks to [@ryu38's contribution](https://github.com/apple/ml-stable-diffusion/pull/153), both the Python CLI and the Swift package support ControlNet models. Please refer to [this section](#converting-models-to-coreml) for details on setting up Stable Diffusion with ControlNet.
 
+Note that ControlNet is not yet supported for Stable Diffusion XL.
+
+</details>
 
 ## <a name="system-multilingual-text-encoder"></a> Using the System Multilingual Text Encoder
 
@@ -288,6 +346,7 @@ Resources:
 
 * Mixed-bit quantized models
 - [`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-mixed-bit-palettization)
+- [`stabilityai/stable-diffusion-xl-base-1.0-ios`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base-ios)
 
 * Uncompressed models:
   - [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-v1-4)
@@ -295,6 +354,7 @@ Resources:
   - [`stabilityai/stable-diffusion-2-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-base)
   - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base)
   - [`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base)
+  - [`stabilityai/stable-diffusion-xl-{base+refiner}-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base-with-refiner)
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 
@@ -370,7 +430,7 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline.
 
-- `--quantize-nbits`: Quantizes the weights of unet and text_encoder models down to 2, 4, 6 or 8 bits using a globally optimal k-means clustering algorithm. By default all models are weight-quantized to 16 bits even if this argument is not specified. Please refer to [this section](#compression for details and further guidance on weight compression.
+- `--quantize-nbits`: Quantizes the weights of unet and text_encoder models down to 2, 4, 6 or 8 bits using a globally optimal k-means clustering algorithm. By default all models are weight-quantized to 16 bits even if this argument is not specified. Please refer to [this section](#compression-6-bits-and-higher for details and further guidance on weight compression.
 
 - `--chunk-unet`: Splits the Unet model in two approximately equal chunks (each with less than 1GB of weights) for mobile-friendly deployment. This is **required** for Neural Engine deployment on iOS and iPadOS if weights are not quantized to 6-bits or less (`--quantize-nbits {2,4,6}`). This is not required for macOS. Swift CLI is able to consume both the chunked and regular versions of the Unet model but prioritizes the former. Note that chunked unet is not compatible with the Python pipeline because Python pipeline is intended for macOS only.
 
@@ -398,7 +458,7 @@ python -m python_coreml_stable_diffusion.pipeline --prompt "a photo of an astron
 ```
 Please refer to the help menu for all available arguments: `python -m python_coreml_stable_diffusion.pipeline -h`. Some notable arguments:
 
-- `-i`: Should point to the `-o` directory from Step 4 of [Converting Models to Core ML](#converting-models-to-coreml) section from above.
+- `-i`: Should point to the `-o` directory from Step 4 of [Converting Models to Core ML](#converting-models-to-coreml) section from above. If you had specified `--bundle-resources-for-swift-cli` during conversion, then `-i` should point to the resulting `Resources` folder which holds the compiled `.mlmodelc` files. The compiled models load much faster after first use.
 - `--model-version`: If you overrode the default model version while converting models to Core ML, you will need to specify the same model version here.
 - `--compute-unit`: Note that the most performant compute unit for this particular implementation may differ across different hardware. `CPU_AND_GPU` or `CPU_AND_NE` may be faster than `ALL`. Please refer to the [Performance Benchmark](#performance-benchmark) section for further guidance.
 - `--scheduler`: If you would like to experiment with different schedulers, you may specify it here. For available options, please see the help menu. You may also specify a custom number of inference steps by `--num-inference-steps` which defaults to 50.
@@ -532,9 +592,10 @@ python -m python_coreml_stable_diffusion.torch2coreml --convert-unet --chunk-une
 <details>
 <summary> <b> Q5: </b> Every time I generate an image using the Python pipeline, loading all the Core ML models takes 2-3 minutes. Is this expected? </summary>
 
-<b> A5: </b> Yes and using the Swift library reduces this to just a few seconds. The reason is that `coremltools` loads Core ML models (`.mlpackage`) and each model is compiled to be run on the requested compute unit during load time. Because of the size and number of operations of the unet model, it takes around 2-3 minutes to compile it for Neural Engine execution. Other models should take at most a few seconds. Note that `coremltools` does not cache the compiled model for later loads so each load takes equally long. In order to benefit from compilation caching, `StableDiffusion` Swift package by default relies on compiled Core ML models (`.mlmodelc`) which will be compiled down for the requested compute unit upon first load but then the cache will be reused on subsequent loads until it is purged due to lack of use.
+<b> A5: </b> Both `.mlpackage` and `.mlmodelc` models are compiled (also known as "model preparation" in Core ML terms) upon first load when a specific compute unit is specified. `.mlpackage` does not cache this compiled asset so each model load retriggers this compilation which may take up to a few minutes. On the other hand, `.mlmodelc` files do cache this compiled asset and non-first load times are reduced to just a few seconds.
 
-If you intend to use the Python pipeline in an application, we recommend initializing the pipeline once so that the load time is only incurred once. Afterwards, generating images using different prompts and random seeds will not incur the load time for the current session of your application.
+In order to benefit from compilation caching, you may use the `.mlmodelc` assets instead of `.mlpackage` assets in both Swift (default) and Python (possible thanks to [@lopez-hector](https://github.com/lopez-hector)'s [contribution](https://github.com/apple/ml-stable-diffusion/commit/f3a212491cf531dd88493c89ad3d98d016db407f)) image generation pipelines.
+
 
 </details>
 
@@ -550,7 +611,7 @@ If your app crashes during image generation, consider adding the [Increased Memo
  
 On iOS, depending on the iPhone model, Stable Diffusion model versions, selected compute units, system load and design of your app, this may still not be sufficient to keep your apps peak memory under the limit. Please remember, because the device shares memory between apps and iOS processes, one app using too much memory can compromise the user experience across the whole device.
 
-We **strongly recommend** quantizing your models with `--quantize-nbits 6` for iOS deployment. This reduces the peak RAM usage by 1GB or more depending on the model version and robustly enables inference even on iPhone 12 Mini.
+We **strongly recommend** compressing your models following the recipes in [Advanced Weight Compression (Lower than 6-bits)](#compression-lower-than-6-bits) for iOS deployment. This reduces the peak RAM usage by up to 75% (from 16-bit to 4-bit) while preserving model output quality.
 
 </details>
 
@@ -568,7 +629,7 @@ We **strongly recommend** quantizing your models with `--quantize-nbits 6` for i
 
   <b> 1. Random Number Generator Behavior </b>
 
-  The main source of potentially different results across PyTorch and Core ML is the Random Number Generator ([RNG](https://en.wikipedia.org/wiki/Random_number_generation)) behavior. PyTorch and Numpy have different sources of randomness. `python_coreml_stable_diffusion` generally relies on Numpy for RNG (e.g. latents initialization) and `StableDiffusion` Swift Library reproduces this RNG behavior by default. However, PyTorch-based pipelines such as Hugging Face `diffusers` relies on PyTorch's RNG behavior. Thanks to @liuliu's [contribution](https://github.com/apple/ml-stable-diffusion/pull/124), one can match the PyTorch (CPU) RNG behavior in Swift by specifying `--rng torch` which selects the `torchRNG` mode.
+  The main source of potentially different results across PyTorch and Core ML is the Random Number Generator ([RNG](https://en.wikipedia.org/wiki/Random_number_generation)) behavior. PyTorch and Numpy have different sources of randomness. `python_coreml_stable_diffusion` generally relies on Numpy for RNG (e.g. latents initialization) and `StableDiffusion` Swift Library reproduces this RNG behavior by default. However, PyTorch-based pipelines such as Hugging Face `diffusers` relies on PyTorch's RNG behavior. Thanks to @liuliu's [contributions](https://github.com/apple/ml-stable-diffusion/pull/124), one can match the PyTorch (CPU/GPU) RNG behavior in Swift by specifying `--rng torch/cuda` which selects the `torchRNG/cudaRNG` mode.
 
   <b> 2. PyTorch </b>
 
@@ -576,7 +637,7 @@ We **strongly recommend** quantizing your models with `--quantize-nbits 6` for i
 
   <b> 3. Model Function Drift During Conversion </b>
 
-  The difference in outputs across corresponding PyTorch and Core ML models is a potential cause. The signal integrity is tested during the conversion process (enabled via `--check-output-correctness` argument to  `python_coreml_stable_diffusion.torch2coreml`) and it is verified to be above a minimum [PSNR](https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio) value as tested on random inputs. Note that this is simply a sanity check and does not guarantee this minimum PSNR across all possible inputs. Furthermore, the results are not guaranteed to be identical when executing the same Core ML models across different compute units. This is not expected to be a major source of difference as the sample visual results indicate in [this section](#compression).
+  The difference in outputs across corresponding PyTorch and Core ML models is a potential cause. The signal integrity is tested during the conversion process (enabled via `--check-output-correctness` argument to  `python_coreml_stable_diffusion.torch2coreml`) and it is verified to be above a minimum [PSNR](https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio) value as tested on random inputs. Note that this is simply a sanity check and does not guarantee this minimum PSNR across all possible inputs. Furthermore, the results are not guaranteed to be identical when executing the same Core ML models across different compute units. This is not expected to be a major source of difference as the sample visual results indicate in [this section](#compression-6-bits-and-higher).
 
   <b> 4. Weights and Activations Data Type </b>
 
