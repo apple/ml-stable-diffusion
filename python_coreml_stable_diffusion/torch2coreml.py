@@ -926,6 +926,8 @@ def convert_safety_checker(pipe, args):
         )
         return
 
+    pipe.safety_checker = pipe.safety_checker.to(torch.float32)
+    
     im_h = pipe.vae.config.sample_size
     im_w = pipe.vae.config.sample_size
 
