@@ -136,6 +136,15 @@ if __name__ == "__main__":
         type=str,
         help=("The string key into --pre-analysis-json-path's baselines dict"
     ))
+    parser.add_argument(
+        "--custom-vae-version",
+        type=str,
+        default=None,
+        help=
+        ("Custom VAE checkpoint to override the pipeline's built-in VAE. "
+            "If specified, the specified VAE will be converted instead of the one associated to the `--model-version` checkpoint. "
+            "No precision override is applied when using a custom VAE."
+    ))
 
     args = parser.parse_args()
 
