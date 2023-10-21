@@ -517,7 +517,10 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                 control_net_additional_residuals = {}
 
             # predict the noise residual
-            unet_additional_kwargs = unet_additional_kwargs | control_net_additional_residuals
+            unet_additional_kwargs = {
+                **unet_additional_kwargs,
+                **control_net_additional_residuals,
+            }
 
             noise_pred = self.unet(
                 sample=latent_model_input.astype(np.float16),
