@@ -827,7 +827,7 @@ def convert_unet(pipe, args, model_name = None):
         logger.info("Done.")
 
         if args.check_output_correctness:
-            baseline_out = pipe.unet(**baseline_sample_unet_inputs,
+            baseline_out = pipe.unet.to(torch.float32)(**baseline_sample_unet_inputs,
                                      return_dict=False)[0].numpy()
             reference_out = reference_unet(*sample_unet_inputs.values())[0].numpy()
             report_correctness(baseline_out, reference_out,
