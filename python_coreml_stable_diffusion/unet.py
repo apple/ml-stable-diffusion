@@ -906,8 +906,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             self.down_blocks.append(down_block)
 
         # mid
-        assert mid_block_type == "UNetMidBlock2DCrossAttn"
-        self.mid_block = UNetMidBlock2DCrossAttn(
+        if mid_block_type == "UNetMidBlock2DCrossAttn":
+            self.mid_block = UNetMidBlock2DCrossAttn(
             in_channels=block_out_channels[-1],
             transformer_layers_per_block=transformer_layers_per_block[-1],
             temb_channels=time_embed_dim,
@@ -1004,12 +1004,13 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
             down_block_res_samples = new_down_block_res_samples
 
         # 4. mid
-        sample = self.mid_block(sample,
+        if self.mid_block is not None:
+            sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
 
-        if additional_residuals:
-            sample = sample + additional_residuals[-1]
+            if additional_residuals:
+                sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:
