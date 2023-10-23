@@ -5,6 +5,7 @@
 
 import argparse
 
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.schedulers import (
@@ -517,7 +518,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
                 control_net_additional_residuals = {}
 
             # predict the noise residual
-            unet_additional_kwargs = unet_additional_kwargs | control_net_additional_residuals
+            unet_additional_kwargs.update(control_net_additional_residuals)
 
             noise_pred = self.unet(
                 sample=latent_model_input.astype(np.float16),
@@ -697,7 +698,6 @@ def main(args):
 
     logger.info("Initializing PyTorch pipe for reference configuration")
 
-    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
     SDP = StableDiffusionXLPipeline if 'xl' in args.model_version else StableDiffusionPipeline
 
     pytorch_pipe = SDP.from_pretrained(
