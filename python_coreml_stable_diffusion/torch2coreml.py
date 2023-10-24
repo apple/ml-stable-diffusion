@@ -480,7 +480,7 @@ def convert_vae_decoder(pipe, args):
         1,  # B
         pipe.vae.config.latent_channels,  # C
         args.latent_h or pipe.unet.config.sample_size,  # H
-        args.latent_w or pipe.unet.config.sample_size,  # w
+        args.latent_w or pipe.unet.config.sample_size,  # W
     )
 
     if args.custom_vae_version is None and args.xl_version:
