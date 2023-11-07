@@ -159,8 +159,8 @@ def _load_mlpackage(submodule_name,
         logger.info(f"Loading {submodule_name} mlmodelc")
 
         # FixMe: Submodule names and compiled resources names differ. Can change if names match in the future.
-        submodule_names = ["text_encoder", "text_encoder_2", "unet", "vae_decoder"]
-        compiled_names = ['TextEncoder', 'TextEncoder2', 'Unet', 'VAEDecoder', 'VAEEncoder']
+        submodule_names = ["text_encoder", "text_encoder_2", "unet", "vae_decoder", "vae_encoder", "safety_checker"]
+        compiled_names = ['TextEncoder', 'TextEncoder2', 'Unet', 'VAEDecoder', 'VAEEncoder', 'SafetyChecker']
         name_map = dict(zip(submodule_names, compiled_names))
 
         cname = name_map[submodule_name] + '.mlmodelc'
