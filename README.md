@@ -429,7 +429,7 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--refiner-version`: The refiner version name as published on the [Hugging Face Hub](https://huggingface.co/models?search=stable-diffusion). This is optional and if specified, this argument will convert and bundle the refiner unet alongside the model unet.
 
-- `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline. However using these compiled models in Python will significantly speed up inference.
+- `--bundle-resources-for-swift-cli`: Compiles all 4 models and bundles them along with necessary resources for text tokenization into `<output-mlpackages-directory>/Resources` which should provided as input to the Swift package. This flag is not necessary for the diffusers-based Python pipeline. [However using these compiled models in Python will significantly speed up inference](https://apple.github.io/coremltools/docs-guides/source/model-prediction.html#why-use-a-compiled-model).
 
 - `--quantize-nbits`: Quantizes the weights of unet and text_encoder models down to 2, 4, 6 or 8 bits using a globally optimal k-means clustering algorithm. By default all models are weight-quantized to 16 bits even if this argument is not specified. Please refer to [this section](#compression-6-bits-and-higher for details and further guidance on weight compression.
 
@@ -459,7 +459,7 @@ python -m python_coreml_stable_diffusion.pipeline --prompt "a photo of an astron
 ```
 Please refer to the help menu for all available arguments: `python -m python_coreml_stable_diffusion.pipeline -h`. Some notable arguments:
 
-- `-i`: Should point to the `-o` directory from Step 4 of [Converting Models to Core ML](#converting-models-to-coreml) section from above. If you specified `--bundle-resources-for-swift-cli` during conversion, then use the resulting `Resources` folder (which holds the compiled `.mlmodelc` files). The compiled models load much faster after first use.
+- `-i`: Should point to the `-o` directory from Step 4 of [Converting Models to Core ML](#converting-models-to-coreml) section from above. If you specified `--bundle-resources-for-swift-cli` during conversion, then use the resulting `Resources` folder (which holds the compiled `.mlmodelc` files). [The compiled models load much faster after first use](https://apple.github.io/coremltools/docs-guides/source/model-prediction.html#why-use-a-compiled-model).
 - `--model-version`: If you overrode the default model version while converting models to Core ML, you will need to specify the same model version here.
 - `--compute-unit`: Note that the most performant compute unit for this particular implementation may differ across different hardware. `CPU_AND_GPU` or `CPU_AND_NE` may be faster than `ALL`. Please refer to the [Performance Benchmark](#performance-benchmark) section for further guidance.
 - `--scheduler`: If you would like to experiment with different schedulers, you may specify it here. For available options, please see the help menu. You may also specify a custom number of inference steps by `--num-inference-steps` which defaults to 50.
