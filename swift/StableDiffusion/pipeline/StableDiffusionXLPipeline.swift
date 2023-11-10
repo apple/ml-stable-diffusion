@@ -136,6 +136,152 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
             print("Error prewarming resources for vae encoder: \(error)")
         }
     }
+
+    /// Image generation using stable diffusion
+    /// - Parameters:
+    ///   - configuration: Image generation configuration
+    ///   - progressHandler: Callback to perform after each step, stops on receiving false response
+    /// - Returns: An array of `imageCount` optional images.
+    ///            The images will be nil if safety checks were performed and found the result to be un-safe
+    public func generateImages(
+        configuration config: Configuration,
+        progressHandler: (Progress) -> Bool = { _ in true }
+    ) throws -> [CGImage?] {
+
+        // Determine input type of Unet
+        // SDXL Refiner has a latentTimeIdShape of [2, 5]
+        // SDXL Base has either [12] or [2, 6]
+        let isRefiner = unet.latentTimeIdShape.last == 5
+
+        // Setup geometry conditioning for base/refiner inputs
+        var baseInput: ModelInputs?
+        var refinerInput: ModelInputs?
+
+        // Check if the first textEncoder is available, which is required for base models
+        if textEncoder != nil {
+            baseInput = try generateConditioning(using: config, forRefiner: isRefiner)
+        }
+
+        // Check if the refiner unet exists, or if the current unet is a refiner
+        if unetRefiner != nil || isRefiner {
+            refinerInput = try generateConditioning(using: config, forRefiner: true)
+        }
+
+        if reduceMemory {
+            textEncoder?.unloadResources()
+            textEncoder2.unloadResources()
+        }
+
+        /// Setup schedulers
+        let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
+            switch config.schedulerType {
+            case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount, timeStepSpacing: config.schedulerTimestepSpacing)
+            }
+        }
+
+        // Generate random latent samples from specified seed
+        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+
+        // Store denoised latents from scheduler to pass into decoder
+        var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
+
+        if reduceMemory {
+            encoder?.unloadResources()
+        }
+
+        let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
+
+        // Store current model
+        var unetModel = unet
+        var currentInput = baseInput ?? refinerInput
+
+        var unetHiddenStates = currentInput?.hiddenStates
+        var unetPooledStates = currentInput?.pooledStates
+        var unetGeometryConditioning = currentInput?.geometryConditioning
+
+        let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
+
+        // Calculate which step to swap to refiner
+        let refinerStartStep = Int(Float(timeSteps.count) * config.refinerStart)
+
+        // De-noising loop
+        for (step,t) in timeSteps.enumerated() {
+            // Expand the latents for classifier-free guidance
+            // and input to the Unet noise prediction model
+            let latentUnetInput = latents.map {
+                MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
+            }
+
+            // Switch to refiner if specified
+            if let refiner = unetRefiner, step == refinerStartStep {
+                unet.unloadResources()
+                
+                unetModel = refiner
+                currentInput = refinerInput
+                unetHiddenStates = currentInput?.hiddenStates
+                unetPooledStates = currentInput?.pooledStates
+                unetGeometryConditioning = currentInput?.geometryConditioning
+            }
+
+            guard let hiddenStates = unetHiddenStates,
+                  let pooledStates = unetPooledStates,
+                  let geometryConditioning = unetGeometryConditioning else {
+                throw PipelineError.missingUnetInputs
+            }
+
+            // Predict noise residuals from latent samples
+            // and current time step conditioned on hidden states
+            var noise = try unetModel.predictNoise(
+                latents: latentUnetInput,
+                timeStep: t,
+                hiddenStates: hiddenStates,
+                pooledStates: pooledStates,
+                geometryConditioning: geometryConditioning
+            )
+
+            noise = performGuidance(noise, config.guidanceScale)
+
+            // Have the scheduler compute the previous (t-1) latent
+            // sample given the predicted noise and current sample
+            for i in 0..<config.imageCount {
+                latents[i] = scheduler[i].step(
+                    output: noise[i],
+                    timeStep: t,
+                    sample: latents[i]
+                )
+                
+                denoisedLatents[i] = scheduler[i].modelOutputs.last ?? latents[i]
+            }
+
+            let currentLatentSamples = config.useDenoisedIntermediates ? denoisedLatents : latents
+
+            // Report progress
+            let progress = Progress(
+                pipeline: self,
+                prompt: config.prompt,
+                step: step,
+                stepCount: timeSteps.count,
+                currentLatentSamples: currentLatentSamples,
+                configuration: config
+            )
+            if !progressHandler(progress) {
+                // Stop if requested by handler
+                return []
+            }
+        }
+
+        // Unload resources
+        if reduceMemory {
+            unet.unloadResources()
+        }
+        unetRefiner?.unloadResources()
+
+
+        // Decode the latent samples to images
+        return try decodeToImages(denoisedLatents, configuration: config)
+    }
+
     /// Image generation using stable diffusion
     /// - Parameters:
     ///   - configuration: Image generation configuration

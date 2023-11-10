@@ -38,6 +38,11 @@ public protocol StableDiffusionPipelineProtocol: ResourceManaging {
 
     func generateImages(
         configuration config: PipelineConfiguration,
+        progressHandler: (PipelineProgress) -> Bool
+    ) throws -> [CGImage?]
+
+    func generateImages(
+        configuration config: PipelineConfiguration,
         progressHandler: (PipelineProgress) async -> Bool
     ) async throws -> [CGImage?]
 
@@ -204,8 +209,8 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
         configuration config: Configuration,
-        progressHandler: (Progress) async -> Bool = { _ in true }
-    ) async throws -> [CGImage?] {
+        progressHandler: (Progress) -> Bool = { _ in true }
+    ) throws -> [CGImage?] {
 
         // Encode the input prompt and negative prompt
         let promptEmbedding = try textEncoder.encode(config.prompt)
@@ -290,6 +295,129 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                     sample: latents[i]
                 )
 
+                denoisedLatents[i] = scheduler[i].modelOutputs.last ?? latents[i]
+            }
+
+            let currentLatentSamples = config.useDenoisedIntermediates ? denoisedLatents : latents
+
+            // Report progress
+            let progress = Progress(
+                pipeline: self,
+                prompt: config.prompt,
+                step: step,
+                stepCount: timeSteps.count,
+                currentLatentSamples: currentLatentSamples,
+                configuration: config
+            )
+            if !progressHandler(progress) {
+                // Stop if requested by handler
+                return []
+            }
+        }
+
+        if reduceMemory {
+            controlNet?.unloadResources()
+            unet.unloadResources()
+        }
+
+        // Decode the latent samples to images
+        return try decodeToImages(denoisedLatents, configuration: config)
+    }
+
+    /// Image generation using stable diffusion
+    /// - Parameters:
+    ///   - configuration: Image generation configuration
+    ///   - progressHandler: Callback to perform after each step, stops on receiving false response
+    /// - Returns: An array of `imageCount` optional images.
+    ///            The images will be nil if safety checks were performed and found the result to be un-safe
+    public func generateImages(
+        configuration config: Configuration,
+        progressHandler: (Progress) async -> Bool = { _ in true }
+    ) async throws -> [CGImage?] {
+
+        // Encode the input prompt and negative prompt
+        let promptEmbedding = try textEncoder.encode(config.prompt)
+        let negativePromptEmbedding = try textEncoder.encode(config.negativePrompt)
+
+        if reduceMemory {
+            textEncoder.unloadResources()
+        }
+
+        // Convert to Unet hidden state representation
+        // Concatenate the prompt and negative prompt embeddings
+        let concatEmbedding = MLShapedArray<Float32>(
+            concatenating: [negativePromptEmbedding, promptEmbedding],
+            alongAxis: 0
+        )
+
+        let hiddenStates = useMultilingualTextEncoder ? concatEmbedding : toHiddenStates(concatEmbedding)
+
+        /// Setup schedulers
+        let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
+            switch config.schedulerType {
+            case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
+            case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount, timeStepSpacing: config.schedulerTimestepSpacing)
+            }
+        }
+
+        // Generate random latent samples from specified seed
+        var latents: [MLShapedArray<Float32>] = try generateLatentSamples(configuration: config, scheduler: scheduler[0])
+
+        // Store denoised latents from scheduler to pass into decoder
+        var denoisedLatents: [MLShapedArray<Float32>] = latents.map { MLShapedArray(converting: $0) }
+
+        if reduceMemory {
+            encoder?.unloadResources()
+        }
+        let timestepStrength: Float? = config.mode == .imageToImage ? config.strength : nil
+
+        // Convert cgImage for ControlNet into MLShapedArray
+        let controlNetConds = try config.controlNetInputs.map { cgImage in
+            let shapedArray = try cgImage.planarRGBShapedArray(minValue: 0.0, maxValue: 1.0)
+            return MLShapedArray(
+                concatenating: [shapedArray, shapedArray],
+                alongAxis: 0
+            )
+        }
+
+        // De-noising loop
+        let timeSteps: [Int] = scheduler[0].calculateTimesteps(strength: timestepStrength)
+        for (step,t) in timeSteps.enumerated() {
+
+            // Expand the latents for classifier-free guidance
+            // and input to the Unet noise prediction model
+            let latentUnetInput = latents.map {
+                MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
+            }
+
+            // Before Unet, execute controlNet and add the output into Unet inputs
+            let additionalResiduals = try controlNet?.execute(
+                latents: latentUnetInput,
+                timeStep: t,
+                hiddenStates: hiddenStates,
+                images: controlNetConds
+            )
+
+            // Predict noise residuals from latent samples
+            // and current time step conditioned on hidden states
+            var noise = try unet.predictNoise(
+                latents: latentUnetInput,
+                timeStep: t,
+                hiddenStates: hiddenStates,
+                additionalResiduals: additionalResiduals
+            )
+
+            noise = performGuidance(noise, config.guidanceScale)
+
+            // Have the scheduler compute the previous (t-1) latent
+            // sample given the predicted noise and current sample
+            for i in 0..<config.imageCount {
+                latents[i] = scheduler[i].step(
+                    output: noise[i],
+                    timeStep: t,
+                    sample: latents[i]
+                )
+                
                 denoisedLatents[i] = scheduler[i].modelOutputs.last ?? latents[i]
             }
 
