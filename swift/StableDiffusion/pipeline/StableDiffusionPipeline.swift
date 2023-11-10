@@ -38,8 +38,8 @@ public protocol StableDiffusionPipelineProtocol: ResourceManaging {
 
     func generateImages(
         configuration config: PipelineConfiguration,
-        progressHandler: (PipelineProgress) -> Bool
-    ) throws -> [CGImage?]
+        progressHandler: (PipelineProgress) async -> Bool
+    ) async throws -> [CGImage?]
 
     func decodeToImages(
         _ latents: [MLShapedArray<Float32>],
@@ -204,8 +204,8 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
         configuration config: Configuration,
-        progressHandler: (Progress) -> Bool = { _ in true }
-    ) throws -> [CGImage?] {
+        progressHandler: (Progress) async -> Bool = { _ in true }
+    ) async throws -> [CGImage?] {
 
         // Encode the input prompt and negative prompt
         let promptEmbedding = try textEncoder.encode(config.prompt)
@@ -304,7 +304,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                 currentLatentSamples: currentLatentSamples,
                 configuration: config
             )
-            if !progressHandler(progress) {
+            if await !progressHandler(progress) {
                 // Stop if requested by handler
                 return []
             }

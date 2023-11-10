@@ -144,8 +144,8 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
     ///            The images will be nil if safety checks were performed and found the result to be un-safe
     public func generateImages(
         configuration config: Configuration,
-        progressHandler: (Progress) -> Bool = { _ in true }
-    ) throws -> [CGImage?] {
+        progressHandler: (Progress) async -> Bool = { _ in true }
+    ) async throws -> [CGImage?] {
 
         // Determine input type of Unet
         // SDXL Refiner has a latentTimeIdShape of [2, 5]
@@ -264,7 +264,7 @@ public struct StableDiffusionXLPipeline: StableDiffusionPipelineProtocol {
                 currentLatentSamples: currentLatentSamples,
                 configuration: config
             )
-            if !progressHandler(progress) {
+            if await !progressHandler(progress) {
                 // Stop if requested by handler
                 return []
             }
