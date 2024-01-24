@@ -183,7 +183,7 @@ Resources:
 <details>
   <summary> Details (Click to expand) </summary>
 
-This section describes an advanced compression algorithm called [Mixed-Bit Palettization (MBP)](https://huggingface.co/blog/stable-diffusion-xl-coreml#what-is-mixed-bit-palettization) built on top of the [Post-Training Weight Palettization tools from coremltools-7.0](https://apple.github.io/coremltools/docs-guides/source/post-training-palettization.html).
+This section describes an advanced compression algorithm called [Mixed-Bit Palettization (MBP)](https://huggingface.co/blog/stable-diffusion-xl-coreml#what-is-mixed-bit-palettization) built on top of the [Post-Training Weight Palettization tools](https://apple.github.io/coremltools/docs-guides/source/post-training-palettization.html) and using the [Weights Metadata API](https://apple.github.io/coremltools/docs-guides/source/mlmodel-utilities.html#get-weights-metadata) from [coremltools](https://github.com/apple/coremltools).
 
 MBP builds a per-layer "palettization recipe" by picking a suitable number of bits among the Neural Engine supported bit-widths of 1, 2, 4, 6 and 8 in order to achieve the minimum average bit-width while maintaining a desired level of signal strength. The signal strength is measured by comparing the compressed model's output to that of the original float16 model. Given the same random seed and text prompts, PSNR between denoised latents is computed. The compression rate will depend on the model version as well as the tolerance for signal loss (drop in PSNR) since this algorithm is adaptive.
 

@@ -21,7 +21,7 @@ import torch.nn as nn
 import requests
 torch.set_grad_enabled(False)
 
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 # Bit-widths the Neural Engine is capable of accelerating
 NBITS = [1, 2, 4, 6, 8]
@@ -342,8 +342,8 @@ def simulate_quant_fn(ref_pipe, quantization_to_simulate):
 
     ref_out = run_pipe(ref_pipe)
     simulated_psnr = sum([
-        float(f"{compute_psnr(r,t):.1f}")
-        for r,t in zip(ref_out, simulated_out)
+        float(f"{compute_psnr(r, t):.1f}")
+        for r, t in zip(ref_out, simulated_out)
     ]) / len(ref_out)
 
     return simulated_out, simulated_psnr
@@ -459,9 +459,7 @@ def main(args):
     json_name = f"{args.model_version.replace('/','-')}_palettization_recipe.json"
     candidates, sizes = get_palettizable_modules(pipe.unet)
 
-    sizes_table = {
-        candidate:size for candidate, size in zip(candidates, sizes)
-    }
+    sizes_table = dict(zip(candidates, sizes))
 
     if os.path.isfile(os.path.join(args.o, json_name)):
         with open(os.path.join(args.o, json_name), "r") as f:
