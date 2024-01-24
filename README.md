@@ -466,6 +466,48 @@ Please refer to the help menu for all available arguments: `python -m python_cor
 - `--controlnet`: ControlNet models specified with this option are used in image generation. Use this option in the format `--controlnet lllyasviel/sd-controlnet-mlsd lllyasviel/sd-controlnet-depth` and make sure to use `--controlnet-inputs` in conjunction.
 - `--controlnet-inputs`: Image inputs corresponding to each ControlNet model. Please provide image paths in same order as models in `--controlnet`, for example: `--controlnet-inputs image_mlsd image_depth`.
 
+Here's an example Python program using the weights found from [mixed bit palettization](https://huggingface.co/apple/coreml-stable-diffusion-mixed-bit-palettization/tree/main/coreml-stable-diffusion-xl-base_mbp_4_50_palettized):
+
+```python
+from diffusers import StableDiffusionXLPipeline
+from python_coreml_stable_diffusion.pipeline import get_coreml_pipe
+
+prompt = "ufo glowing 8k"
+negative_prompt = ""
+
+SDP = StableDiffusionXLPipeline    
+pytorch_pipe = SDP.from_pretrained(
+                          "stabilityai/stable-diffusion-xl-base-1.0",
+                           use_auth_token=False,
+                           )
+coreml_pipe = get_coreml_pipe(
+                pytorch_pipe=pytorch_pipe,
+                mlpackages_dir="./coreml-stable-diffusion-mixed-bit-palettization_original_compiled/compiled/",
+                model_version="stabilityai/stable-diffusion-xl-base-1.0",
+                compute_unit="CPU_AND_GPU",
+                scheduler_override=None,
+                controlnet_models=None,
+                force_zeros_for_empty_prompt=False,
+                sources=None,
+                )
+controlnet_cond = None
+image = coreml_pipe(
+                prompt=prompt,
+                height=coreml_pipe.height,
+                width=coreml_pipe.width,
+                num_inference_steps=60,
+                guidance_scale=7.5,
+                controlnet_cond=controlnet_cond,
+                negative_prompt=negative_prompt,
+            )
+img = image["images"][0]
+img.save("out.jpg")
+```
+
+The code assumes you've downloaded the `./coreml-stable-diffusion-mixed-bit-palettization_original_compiled/compiled/` files to the same directory.
+
+The script will download another model and then re-compiled the previously compiled `.mlmodelc` files too. It will take a while on the first run, and then be faster after.
+
 </details>
 
 ## <a name="image-gen-swift"></a> Image Generation with Swift
