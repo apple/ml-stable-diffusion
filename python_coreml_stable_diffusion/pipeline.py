@@ -668,21 +668,30 @@ def get_coreml_pipe(pytorch_pipe,
     return coreml_pipe
 
 
-def get_image_path(args, **override_kwargs):
+def get_image_path(args):
     """ mkdir output folder and encode metadata in the filename
     """
-    out_folder = os.path.join(args.o, "_".join(args.prompt.replace("/", "_").rsplit(" ")))
+    current = time.strftime('%Y-%m-%d %H-%M-%S',time.localtime(time.time()))
+    out_folder = os.path.join(args.o, current)
     os.makedirs(out_folder, exist_ok=True)
+    return os.path.join(out_folder, current + ".png")
 
-    out_fname = f"randomSeed_{override_kwargs.get('seed', None) or args.seed}"
-    out_fname += f"_computeUnit_{override_kwargs.get('compute_unit', None) or args.compute_unit}"
-    out_fname += f"_modelVersion_{override_kwargs.get('model_version', None) or args.model_version.replace('/', '_')}"
+
+def save_image_args(args, image_fname, **override_kwargs):
+    """ save encode metadata in text file which filename same to image file
+    """
+    content = "_".join(args.prompt.replace("/", "_").rsplit(" ")) + "\n"
+    content += f"randomSeed_{override_kwargs.get('seed', None) or args.seed}" + "\n"
+    content += f"_computeUnit_{override_kwargs.get('compute_unit', None) or args.compute_unit}" + "\n"
+    content += f"_modelVersion_{override_kwargs.get('model_version', None) or args.model_version.replace('/', '_')}" + "\n"
 
     if args.scheduler is not None:
-        out_fname += f"_customScheduler_{override_kwargs.get('scheduler', None) or args.scheduler}"
-        out_fname += f"_numInferenceSteps{override_kwargs.get('num_inference_steps', None) or args.num_inference_steps}"
+        content += f"_customScheduler_{override_kwargs.get('scheduler', None) or args.scheduler}" + "\n"
+        content += f"_numInferenceSteps{override_kwargs.get('num_inference_steps', None) or args.num_inference_steps}" + "\n"
 
-    return os.path.join(out_folder, out_fname + ".png")
+    with open(image_fname.replace(".png", ".txt"), 'w') as f:
+        f.write(content)
+    return
 
 
 def prepare_controlnet_cond(image_path, height, width):
@@ -748,6 +757,7 @@ def main(args):
     )
 
     out_path = get_image_path(args)
+    save_image_args(args, out_path)
     logger.info(f"Saving generated image to {out_path}")
     image["images"][0].save(out_path)
 
