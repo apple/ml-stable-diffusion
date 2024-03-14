@@ -13,6 +13,8 @@ public enum StableDiffusionScheduler {
     case pndmScheduler
     /// Scheduler that uses a second order DPM-Solver++ algorithm
     case dpmSolverMultistepScheduler
+
+    case eulerAncestralDiscreteScheduler
 }
 
 /// RNG compatible with StableDiffusionPipeline
@@ -229,6 +231,9 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             switch config.schedulerType {
             case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount, timeStepSpacing: config.schedulerTimestepSpacing)
+            case .eulerAncestralDiscreteScheduler: return EulerAncestralDiscreteScheduler(
+                randomSource: randomSource(from: config.rngType, seed: config.seed),
+                stepCount: config.stepCount)
             }
         }
 
@@ -258,8 +263,14 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
 
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
-            let latentUnetInput = latents.map {
+            var latentUnetInput = latents.map {
                 MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
+            }
+
+            for i in 0..<config.imageCount {
+                latentUnetInput[i] = scheduler[i].scaleModelInput(
+                    sample: latentUnetInput[i],
+                    timeStep: t)
             }
 
             // Before Unet, execute controlNet and add the output into Unet inputs

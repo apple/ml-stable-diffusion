@@ -47,6 +47,11 @@ public protocol Scheduler {
         timeStep t: Int,
         sample s: MLShapedArray<Float32>
     ) -> MLShapedArray<Float32>
+
+    func scaleModelInput(
+        sample: MLShapedArray<Float32>,
+        timeStep: Int
+    ) -> MLShapedArray<Float32>
 }
 
 @available(iOS 16.2, macOS 13.1, *)
@@ -100,6 +105,13 @@ public extension Scheduler {
 
         return noisySamples
     }
+
+    func scaleModelInput(
+        sample: MLShapedArray<Float32>,
+        timeStep: Int
+    ) -> MLShapedArray<Float32> {
+        return sample
+    }
 }
 
 // MARK: - Timesteps
@@ -123,6 +135,13 @@ public enum BetaSchedule {
     case linear
     /// Steps using linspace(sqrt(start),sqrt(end))^2
     case scaledLinear
+}
+
+@available(iOS 16.2, macOS 13.1, *)
+public enum TimestepSpacing {
+    case linspace
+    case leading
+    case trailing
 }
 
 // MARK: - PNDMScheduler
