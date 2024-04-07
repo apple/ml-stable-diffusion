@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "stable-diffusion",
     platforms: [
-        .macOS(.v11),
-        .iOS(.v14),
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     products: [
         .library(
@@ -18,18 +18,23 @@ let package = Package(
             targets: ["StableDiffusionCLI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.3")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.3"),
+        .package(url: "https://github.com/GuernikaCore/RandomGenerator.git", from: "1.0.0")
     ],
     targets: [
         .target(
             name: "StableDiffusion",
-            dependencies: [],
+            dependencies: [
+                .product(name: "RandomGenerator", package: "RandomGenerator")
+            ],
             path: "swift/StableDiffusion"),
         .executableTarget(
             name: "StableDiffusionCLI",
             dependencies: [
                 "StableDiffusion",
-                .product(name: "ArgumentParser", package: "swift-argument-parser")],
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "RandomGenerator", package: "RandomGenerator")
+                ],
             path: "swift/StableDiffusionCLI"),
         .testTarget(
             name: "StableDiffusionTests",

@@ -71,8 +71,8 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Compute units to load model with {all,cpuOnly,cpuAndGPU,cpuAndNeuralEngine}")
     var computeUnits: ComputeUnits = .all
 
-    @Option(help: "Scheduler to use, one of {pndm, dpmpp}")
-    var scheduler: SchedulerOption = .pndm
+    @Option(help: "Scheduler to use, one of {pndm, dpmpp, lcm}")
+    var scheduler: SchedulerOption = .lcm
 
     @Option(help: "Random number generator to use, one of {numpy, torch, nvidia}")
     var rng: RNGOption = .numpy
@@ -324,10 +324,11 @@ enum ComputeUnits: String, ExpressibleByArgument, CaseIterable {
 
 @available(iOS 16.2, macOS 13.1, *)
 enum SchedulerOption: String, ExpressibleByArgument {
-    case pndm, dpmpp
+    case dpmpp, pndm, lcm
     var stableDiffusionScheduler: StableDiffusionScheduler {
         switch self {
         case .pndm: return .pndmScheduler
+        case .lcm: return .lcmScheduler
         case .dpmpp: return .dpmSolverMultistepScheduler
         }
     }

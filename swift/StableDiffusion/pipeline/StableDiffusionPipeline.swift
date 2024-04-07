@@ -11,6 +11,8 @@ import NaturalLanguage
 public enum StableDiffusionScheduler {
     /// Scheduler that uses a pseudo-linear multi-step (PLMS) method
     case pndmScheduler
+
+    case lcmScheduler
     /// Scheduler that uses a second order DPM-Solver++ algorithm
     case dpmSolverMultistepScheduler
 }
@@ -228,6 +230,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
             switch config.schedulerType {
             case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
+            case .lcmScheduler: return LCMScheduler(stepCount: config.stepCount)
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount, timeStepSpacing: config.schedulerTimestepSpacing)
             }
         }

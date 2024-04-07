@@ -35,7 +35,7 @@ public struct PipelineConfiguration: Hashable {
     /// Random seed which to start generation
     public var seed: UInt32 = 0
     /// Controls the influence of the text prompt on sampling process (0=random images)
-    public var guidanceScale: Float = 7.5
+    public var guidanceScale: Float = 1.0
     /// List of Images for available ControlNet Models
     public var controlNetInputs: [CGImage] = []
     /// Safety checks are only performed if `self.canSafetyCheck && !disableSafety`
@@ -44,6 +44,7 @@ public struct PipelineConfiguration: Hashable {
     public var useDenoisedIntermediates: Bool = false
     /// The type of Scheduler to use.
     public var schedulerType: StableDiffusionScheduler = .pndmScheduler
+    // public var schedulerType: StableDiffusionScheduler = .lcmScheduler
     /// The spacing to use for scheduler sigmas and time steps. Only supported when using `.dpmppScheduler`.
     public var schedulerTimestepSpacing: TimeStepSpacing = .linspace
     /// The type of RNG to use

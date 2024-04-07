@@ -3,6 +3,7 @@
 
 import Accelerate
 import CoreML
+import RandomGenerator
 
 @available(iOS 16.2, macOS 13.1, *)
 public protocol Scheduler {
@@ -350,9 +351,14 @@ public final class PNDMScheduler: Scheduler {
 ///   - end: End of the interval
 ///   - count: The number of floats to return between [*start*, *end*]
 /// - Returns: Float array with *count* elements evenly spaced between at *start* and *end*
-func linspace(_ start: Float, _ end: Float, _ count: Int) -> [Float] {
-    let scale = (end - start) / Float(count - 1)
-    return (0..<count).map { Float($0)*scale + start }
+func linspace(_ start: Float, _ end: Float, _ count: Int, endpoint: Bool = true) -> [Float] {
+    let div = endpoint ? count - 1 : count
+    let scale = (end - start) / Float(div)
+    var y = (0..<count).map { Float($0)*scale + start }
+    if endpoint {
+        y[count - 1] = end
+    }
+    return y
 }
 
 extension Collection {
@@ -360,4 +366,215 @@ extension Collection {
     public subscript(back i: Int) -> Element {
         return self[index(endIndex, offsetBy: -i)]
     }
+}
+
+
+@available(iOS 16.2, macOS 13.1, *)
+public final class LCMScheduler: Scheduler {
+    public let trainStepCount: Int
+    public let inferenceStepCount: Int
+    public let betas: [Float]
+    public let alphas: [Float]
+    public let alphasCumProd: [Float]
+    public let timeSteps: [Int]
+
+    public let alpha_t: [Float]
+    public let sigma_t: [Float]
+    public let lambda_t: [Float]
+
+    public private(set) var modelOutputs: [MLShapedArray<Float32>] = []
+
+    // Internal state
+    var counter: Int
+    // var ets: [MLShapedArray<Float32>]
+    var currentSample: MLShapedArray<Float32>?
+    // var stepIndex: Int
+
+    /// LCM from pytorch
+    var finalAlphaCumProd: Float32
+    let sigma_data: Float32
+    let timeStepScaling: Float32
+    let generator: RandomGenerator
+
+    /// Create a scheduler that uses a pseudo linear multi-step (PLMS)  method
+    ///
+    /// - Parameters:
+    ///   - stepCount: Number of inference steps to schedule
+    ///   - trainStepCount: Number of training diffusion steps
+    ///   - betaSchedule: Method to schedule betas from betaStart to betaEnd
+    ///   - betaStart: The starting value of beta for inference
+    ///   - betaEnd: The end value for beta for inference
+    /// - Returns: A scheduler ready for its first step
+    public init(
+        stepCount: Int = 50,
+        trainStepCount: Int = 1000,
+        betaSchedule: BetaSchedule = .scaledLinear,
+        betaStart: Float = 0.00085,
+        betaEnd: Float = 0.012
+    ) {
+        self.trainStepCount = trainStepCount
+        self.inferenceStepCount = stepCount
+
+        switch betaSchedule {
+        case .linear:
+            self.betas = linspace(betaStart, betaEnd, trainStepCount)
+        case .scaledLinear:
+            self.betas = linspace(pow(betaStart, 0.5), pow(betaEnd, 0.5), trainStepCount).map({ $0 * $0 })
+        }
+        self.alphas = betas.map({ 1.0 - $0 })
+        var alphasCumProd = self.alphas
+        for i in 1..<alphasCumProd.count {
+            alphasCumProd[i] *= alphasCumProd[i -  1]
+        }
+        self.alphasCumProd = alphasCumProd
+
+        self.finalAlphaCumProd = alphasCumProd[0]
+
+        // let stepRatio = Float(trainStepCount / 50 )
+        // var lcmOriginTimeSteps = (1...max(1, 50)).map {
+        //     (Float($0) * stepRatio).rounded() - 1
+        // }
+        var lcmOriginTimeSteps = (1...max(1, 1000)).map {
+            (Float($0)).rounded() - 1
+        }
+        lcmOriginTimeSteps.reverse()
+        print("lcmOriginTimeSteps:", lcmOriginTimeSteps)
+
+        let timeStepsIndexes = linspace(0, Float(lcmOriginTimeSteps.count), stepCount, endpoint: false)
+            .map { Int($0) }
+        print("timeStepsIndexes:", timeStepsIndexes)
+
+        self.timeSteps = timeStepsIndexes.map{ Int(lcmOriginTimeSteps[$0]) }
+
+        print("timeSteps:", self.timeSteps)
+
+        self.alpha_t = vForce.sqrt(self.alphasCumProd)
+        self.sigma_t = vForce.sqrt(vDSP.subtract([Float](repeating: 1, count: self.alphasCumProd.count), self.alphasCumProd))
+        self.lambda_t = zip(self.alpha_t, self.sigma_t).map { α, σ in log(α) - log(σ) }
+
+        // let stepsOffset = 1 // For stable diffusion
+        // let stepRatio = Float(trainStepCount / stepCount )
+        // let forwardSteps = (0..<stepCount).map {
+        //     Int((Float($0) * stepRatio).rounded()) + stepsOffset
+        // }
+
+        // var timeSteps: [Int] = []
+        // timeSteps.append(contentsOf: forwardSteps.dropLast(1))
+        // timeSteps.append(timeSteps.last!)
+        // timeSteps.append(forwardSteps.last!)
+        // timeSteps.reverse()
+        // self.timeSteps = timeSteps
+
+        self.counter = 0
+        self.currentSample = nil
+
+        ///  ------ for LCM ------- 
+        self.finalAlphaCumProd = self.alphasCumProd[0]
+        self.sigma_data = 0.5
+        self.timeStepScaling = 10.0
+        self.generator = TorchRandomGenerator(seed: 999)
+    }
+
+    /// Compute a de-noised image sample and step scheduler state
+    ///
+    /// - Parameters:
+    ///   - output: The predicted residual noise output of learned diffusion model
+    ///   - timeStep: The current time step in the diffusion chain
+    ///   - sample: The current input sample to the diffusion model
+    /// - Returns: Predicted de-noised sample at the previous time step
+    /// - Postcondition: The scheduler state is updated.
+    ///   The state holds the current sample and history of model output noise residuals
+    public func step(
+        output: MLShapedArray<Float32>,
+        timeStep t: Int,
+        sample s: MLShapedArray<Float32>
+    ) -> MLShapedArray<Float32> {
+
+        
+        let modelOutput = output
+        let sample = s
+     
+
+        // let prevStepIndex = stepIndex + 1
+
+        let timeStep = t
+        let stepIndex = timeSteps.firstIndex(of: timeStep) ?? timeSteps.count - 1
+        let prevTimeStep = Int(stepIndex < timeSteps.count - 1 ? timeSteps[stepIndex + 1] : 0)
+        print("timestep, stepindex, prevTimestep: ", timeStep, stepIndex, prevTimeStep)
+
+        // if prevStepIndex < timeSteps.count {
+        //     prevTimeStep = timeSteps[prevStepIndex]
+        // }
+
+        let alphaProdT = alphasCumProd[timeStep]
+        let alphaProdTPrev = prevTimeStep >= 0 ? alphasCumProd[prevTimeStep] : finalAlphaCumProd
+
+        let betaProdT = 1 - alphaProdT
+        let betaProdTPrev = 1 - alphaProdTPrev
+
+        print("alphas:", alphaProdT, alphaProdTPrev)
+        print("betas:", betaProdT, betaProdTPrev)
+
+        // step 3: Get scalings for boundary conditions
+        let (cSkip, cOut) = getScalingsForBoundaryConditionDiscrete(timeStep)
+        print("got scalings: skip, out: ", cSkip, cOut)
+
+        // step 4: Compute the predicted original sample x_0 based on the model parameterization
+        // x-prediction 
+        // let predictedOriginalSample = modelOutput
+        // v-prediction 
+        // let predictedOriginalSample = weightedSum(
+        //     [Double(sqrt(alphaProdT)), Double(sqrt(betaProdT))],
+        //     [sample, modelOutput]
+        // )
+        let scalarCount = modelOutput.scalarCount
+        let predictedOriginalSample = MLShapedArray(unsafeUninitializedShape: output.shape) { scalars, _ in
+                sample.withUnsafeShapedBufferPointer { sample, _, _ in
+                    output.withUnsafeShapedBufferPointer { output, _, _ in
+                        for i in 0..<scalarCount {
+                            scalars.initializeElement(at: i, to: (sample[i] - sqrt(betaProdT) * output[i]) / sqrt(alphaProdT))
+                        }
+                    }
+                }
+            }
+
+        // //todo: clip sample
+        let denoised = weightedSum(
+            [Double(cOut), Double(cSkip)], 
+            [predictedOriginalSample, sample]
+        )
+
+        modelOutputs.removeAll(keepingCapacity: true)
+        modelOutputs.append(denoised)
+
+        let prevSample: MLShapedArray<Float32>
+        // if stepIndex != inferenceStepCount - 1 {
+        if timeStep != timeSteps.last {
+            print("generating noise, timestep: ", timeStep)
+            let noise = MLShapedArray<Float32>(converting: generator.nextArray(shape: output.shape))
+            prevSample = weightedSum(
+                [Double(sqrt(alphaProdTPrev)), Double(sqrt(betaProdTPrev))],
+                [denoised, noise]
+            )
+        } else {
+            prevSample = denoised
+        }
+
+        // counter += 1
+        return prevSample
+    }
+
+        func getScalingsForBoundaryConditionDiscrete(
+        _ timeStep: Int
+    ) ->  (Float, Float) { 
+        let scaledTimeStep = Float32(timeStep) * timeStepScaling
+        let powScaledTimeStep = pow(scaledTimeStep, 2)
+        let powSigma = pow(sigma_data, 2)
+
+        let cSkip = powSigma / (powScaledTimeStep + powSigma)
+        let cOut = scaledTimeStep / pow((powScaledTimeStep + powSigma), 0.5)
+
+        return (cSkip, cOut)
+    }
+
 }
