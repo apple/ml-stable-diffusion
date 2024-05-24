@@ -1,9 +1,9 @@
-coremltools>=7.0
+coremltools>=7.0,<7.1
 diffusers[torch]
-torch
+torch==2.0.0
 transformers==4.29.2
 scipy
-scikit-learn
+scikit-learn<=1.1.2
 pytest
 invisible-watermark
 safetensors
