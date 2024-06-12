@@ -13,6 +13,8 @@ public enum StableDiffusionScheduler {
     case pndmScheduler
     /// Scheduler that uses a second order DPM-Solver++ algorithm
     case dpmSolverMultistepScheduler
+    /// Scheduler for rectified flow based multimodal diffusion transformer models
+    case discreteFlowScheduler
 }
 
 /// RNG compatible with StableDiffusionPipeline
@@ -30,6 +32,7 @@ public enum PipelineError: String, Swift.Error {
     case startingImageProvidedWithoutEncoder
     case startingText2ImgWithoutTextEncoder
     case unsupportedOSVersion
+    case errorCreatingPreview
 }
 
 @available(iOS 16.2, macOS 13.1, *)
@@ -229,6 +232,7 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             switch config.schedulerType {
             case .pndmScheduler: return PNDMScheduler(stepCount: config.stepCount)
             case .dpmSolverMultistepScheduler: return DPMSolverMultistepScheduler(stepCount: config.stepCount, timeStepSpacing: config.schedulerTimestepSpacing)
+            case .discreteFlowScheduler: return DiscreteFlowScheduler(stepCount: config.stepCount, timeStepShift: config.schedulerTimestepShift)
             }
         }
 
