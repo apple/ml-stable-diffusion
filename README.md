@@ -246,6 +246,64 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 
 </details>
 
+
+## <a name="using-stable-diffusion-3"></a> Using Stable Diffusion 3
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+### Model Conversion
+
+Stable Diffusion 3 uses some new and some old models to run. For the text encoders, the conversion can be done using a similar command as before
+
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
+```
+
+For the new models (MMDiT and a new VAE with 16 channels), the conversion can be done through the [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit) repo with the following commands:
+
+```bash
+git clone https://github.com/argmaxinc/DiffusionKit.git
+cd DiffusionKit
+pip install -e .
+```
+
+Once installed, you can convert the MMDiT model using:
+
+```bash
+python -m tests.torch2coreml.test_mmdit --sd3-ckpt-path <path-to-sd3-mmdit.safetensors> --model-version {2b} -o <output-mlpackages-directory> --latent-size {64, 128}
+```
+
+And similar for the new VAE model:
+
+```bash
+python -m tests.torch2coreml.test_vae --sd3-ckpt-path <path-to-sd3-mmdit.safetensors> -o <output-mlpackages-directory> --latent-size {64, 128}
+```
+
+### Swift Inference
+
+Swift inference for Stable Diffusion 3 is similar to the previous versions. The only difference is that the `--sd3` flag should be used to indicate that the model is a Stable Diffusion 3 model.
+
+```bash
+swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units cpuAndGPU --sd3
+```
+
+### Python MLX Inference
+
+Python inference is supported via the [MLX](https://github.com/ml-explore) backend in [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit). The following command can be used to generate images using Stable Diffusion 3:
+
+```bash
+diffusionkit-cli --prompt "a photo of a cat" --output-path </path/to/output/image.png> --seed 0 -w16 -a16
+```
+
+Some notable optional arguments:
+
+- For image-to-image, use --image-path (path to input image) and --denoise (value between 0. and 1.)
+- T5 text embeddings, use --t5
+- For different resolutions, use --height and --width
+
+</details>
+
 ## <a name="using-stable-diffusion-xl"></a> Using Stable Diffusion XL
 
 <details>
