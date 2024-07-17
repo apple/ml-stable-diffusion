@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreML
+import Tokenizers
 
 @available(iOS 17.0, macOS 14.0, *)
 public protocol TextEncoderT5Model: ResourceManaging {
@@ -59,7 +60,8 @@ public struct TextEncoderT5: TextEncoderT5Model {
         let inputLength = inputShape.last!
 
         // Tokenize, padding to the expected length
-        var (tokens, ids) = tokenizer.tokenize(input: text)
+        var tokens = tokenizer.tokenize(text: text)
+        var ids = tokens.map { tokenizer.convertTokenToId($0) ?? 0 }
 
         // Truncate if necessary
         if ids.count > inputLength {
@@ -78,15 +80,20 @@ public struct TextEncoderT5: TextEncoderT5Model {
         let inputShape = inputShape
         let inputLength = inputShape[1]
                 
+        let bosToken = tokenizer.bosTokenId ?? 0
+        let eosToken = tokenizer.eosTokenId ?? 1
+        let padToken = bosToken
+        let maskToken = eosToken
+
         // Truncate and pad input to the expected length
-        let truncatedIds = ids.prefix(inputLength - 1) + [tokenizer.eosTokenId]
-        let inputIds = truncatedIds + Array(repeating: tokenizer.padTokenId, count: inputLength - truncatedIds.count)
-        
+        let truncatedIds = ids.prefix(inputLength - 1) + [eosToken]
+        let inputIds = truncatedIds + Array(repeating: padToken, count: inputLength - truncatedIds.count)
+
         let attentionMaskName = "attention_mask"
         var attentionMask: [Int] = inputIds.map { token in
-            token == tokenizer.padTokenId ? tokenizer.maskTokenId : tokenizer.padTokenId
+            token == padToken ? maskToken : padToken
         }
-        attentionMask[0] = tokenizer.bosTokenId
+        attentionMask[0] = bosToken
 
         let floatIds = inputIds.map { Float32($0) }
         let floatMask = attentionMask.map { Float32($0) }

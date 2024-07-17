@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "stable-diffusion",
     platforms: [
-        .macOS(.v11),
-        .iOS(.v14),
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     products: [
         .library(
@@ -18,12 +18,15 @@ let package = Package(
             targets: ["StableDiffusionCLI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.3")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.3"),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", exact: "0.1.8"),
     ],
     targets: [
         .target(
             name: "StableDiffusion",
-            dependencies: [],
+            dependencies:  [
+                .product(name: "Transformers", package: "swift-transformers"),
+            ],
             path: "swift/StableDiffusion"),
         .executableTarget(
             name: "StableDiffusionCLI",

@@ -3,6 +3,8 @@
 
 import CoreML
 import Foundation
+import Tokenizers
+import Hub
 
 @available(iOS 17.0, macOS 14.0, *)
 public extension StableDiffusion3Pipeline {
@@ -61,7 +63,7 @@ public extension StableDiffusion3Pipeline {
            FileManager.default.fileExists(atPath: urls.dataT5URL.path),
            FileManager.default.fileExists(atPath: urls.textEncoderT5URL.path)
         {
-            let tokenizerT5 = try PreTrainedTokenizer(tokenizerConfigURL: urls.configT5URL, tokenizerDataURL: urls.dataT5URL)
+            let tokenizerT5 = try PreTrainedTokenizer(tokenizerConfig: Config(fileURL: urls.configT5URL), tokenizerData: Config(fileURL: urls.dataT5URL))
             textEncoderT5 = TextEncoderT5(tokenizer: tokenizerT5, modelAt: urls.textEncoderT5URL, configuration: config)
         } else {
             textEncoderT5 = nil
