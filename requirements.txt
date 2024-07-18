@@ -1,5 +1,6 @@
 coremltools>=7.0
 diffusers[torch]
+diffusionkit
 torch
 transformers==4.29.2
 scipy

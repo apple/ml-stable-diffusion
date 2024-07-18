@@ -16,7 +16,12 @@ from diffusers import (
     DiffusionPipeline,
     ControlNetModel
 )
+from diffusionkit.tests.torch2coreml import (
+    convert_mmdit_to_mlpackage,
+    convert_vae_to_mlpackage
+)
 import gc
+from huggingface_hub import snapshot_download
 
 import logging
 
@@ -207,6 +212,26 @@ def _compile_coreml_model(source_model_path, output_dir, final_name):
     return target_path
 
 
+def _download_t5_model(args, t5_save_path):
+    t5_url = args.text_encoder_t5_url
+    match = re.match(r'https://huggingface.co/(.+)/resolve/main/(.+)', t5_url)
+    if not match:
+        raise ValueError(f"Invalid Hugging Face URL: {t5_url}")
+    repo_id, model_subpath = match.groups()
+
+    download_path = snapshot_download(
+        repo_id=repo_id,
+        revision="main",
+        allow_patterns=[f"{model_subpath}/*"]
+    )
+    logger.info(f"Downloaded T5 model to {download_path}")
+
+    # Move the downloaded model to the top level of the Resources directory
+    logger.info(f"Copying T5 model from {download_path} to {t5_save_path}")
+    cache_path = os.path.join(download_path, model_subpath)
+    shutil.copytree(cache_path, t5_save_path)
+
+
 def bundle_resources_for_swift_cli(args):
     """
     - Compiles Core ML models from mlpackage into mlmodelc format
@@ -228,6 +253,7 @@ def bundle_resources_for_swift_cli(args):
                                      ("refiner", "UnetRefiner"),
                                      ("refiner_chunk1", "UnetRefinerChunk1"),
                                      ("refiner_chunk2", "UnetRefinerChunk2"),
+                                     ("mmdit", "MultiModalDiffusionTransformer"),
                                      ("control-unet", "ControlledUnet"),
                                      ("control-unet_chunk1", "ControlledUnetChunk1"),
                                      ("control-unet_chunk2", "ControlledUnetChunk2"),
@@ -241,7 +267,7 @@ def bundle_resources_for_swift_cli(args):
             logger.warning(
                 f"{source_path} not found, skipping compilation to {target_name}.mlmodelc"
             )
-            
+
     if args.convert_controlnet:
         for controlnet_model_version in args.convert_controlnet:
             controlnet_model_name = controlnet_model_version.replace("/", "_")
@@ -270,6 +296,25 @@ def bundle_resources_for_swift_cli(args):
     with open(os.path.join(resources_dir, "merges.txt"), "wb") as f:
         f.write(requests.get(args.text_encoder_merges_url).content)
     logger.info("Done")
+
+    # Fetch and save pre-converted T5 text encoder model
+    t5_model_name = "TextEncoderT5.mlmodelc"
+    t5_save_path = os.path.join(resources_dir, t5_model_name)
+    if args.include_t5:
+        if not os.path.exists(t5_save_path):
+            logger.info("Downloading pre-converted T5 encoder model TextEncoderT5.mlmodelc")
+            _download_t5_model(args, t5_save_path)
+            logger.info("Done")
+
+            # Fetch and save T5 text tokenizer JSON files
+            logger.info("Downloading and saving T5 tokenizer files tokenizer_config.json and tokenizer.json")
+            with open(os.path.join(resources_dir, "tokenizer_config.json"), "wb") as f:
+                f.write(requests.get(args.text_encoder_t5_config_url).content)
+            with open(os.path.join(resources_dir, "tokenizer.json"), "wb") as f:
+                f.write(requests.get(args.text_encoder_t5_data_url).content)
+            logger.info("Done")
+        else:
+            logger.info(f"Skipping T5 download as {t5_save_path} already exists")
 
     return resources_dir
 
@@ -557,6 +602,27 @@ def convert_vae_decoder(pipe, args):
     del traced_vae_decoder, pipe.vae.decoder, coreml_vae_decoder
     gc.collect()
 
+def convert_vae_decoder_sd3(args):
+    """ Converts the VAE component of Stable Diffusion 3
+    """
+    out_path = _get_out_path(args, "vae_decoder")
+    if os.path.exists(out_path):
+        logger.info(
+            f"`vae_decoder` already exists at {out_path}, skipping conversion."
+        )
+        return
+    
+    # Convert the VAE Decoder model via DiffusionKit
+    converted_vae_path = convert_vae_to_mlpackage(
+        model_version=args.model_version, 
+        latent_h=args.latent_h, 
+        latent_w=args.latent_w, 
+        output_dir=args.o,
+    )
+
+    # Rename the output file to match the expected name
+    if os.path.exists(converted_vae_path):
+        os.rename(converted_vae_path, out_path)
 
 def convert_vae_encoder(pipe, args):
     """ Converts the VAE Encoder component of Stable Diffusion
@@ -907,6 +973,29 @@ def convert_unet(pipe, args, model_name = None):
         args.remove_original = False
         args.merge_chunks_in_pipeline_model = False
         chunk_mlprogram.main(args)
+
+
+def convert_mmdit(args):
+    """ Converts the MMDiT component of Stable Diffusion 3
+    """
+    out_path = _get_out_path(args, "mmdit")
+    if os.path.exists(out_path):
+        logger.info(
+            f"`mmdit` already exists at {out_path}, skipping conversion."
+        )
+        return
+    
+    # Convert the MMDiT model via DiffusionKit
+    converted_mmdit_path = convert_mmdit_to_mlpackage(
+        model_version=args.model_version, 
+        latent_h=args.latent_h, 
+        latent_w=args.latent_w, 
+        output_dir=args.o,
+    )
+
+    # Rename the output file to match the expected name
+    if os.path.exists(converted_mmdit_path):
+        os.rename(converted_mmdit_path, out_path)
 
 
 def convert_safety_checker(pipe, args):
@@ -1288,6 +1377,13 @@ def get_pipeline(args):
                                             use_safetensors=True,
                                             vae=vae,
                                             use_auth_token=True)
+    elif args.sd3_version:
+        # SD3 uses standard SDXL diffusers pipeline besides the vae, denoiser, and T5 text encoder
+        pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0",
+                                            torch_dtype=torch.float16,
+                                            variant="fp16",
+                                            use_safetensors=True,
+                                            use_auth_token=True)
     else:
         pipe = DiffusionPipeline.from_pretrained(model_version,
                                             torch_dtype=torch.float16,
@@ -1316,7 +1412,10 @@ def main(args):
     # Convert models
     if args.convert_vae_decoder:
         logger.info("Converting vae_decoder")
-        convert_vae_decoder(pipe, args)
+        if args.sd3_version:
+            convert_vae_decoder_sd3(args)
+        else:
+            convert_vae_decoder(pipe, args)
         logger.info("Converted vae_decoder")
 
     if args.convert_vae_encoder:
@@ -1363,6 +1462,11 @@ def main(args):
         del pipe
         gc.collect()
         logger.info(f"Converted refiner")
+    
+    if args.convert_mmdit:
+        logger.info("Converting mmdit")
+        convert_mmdit(args)
+        logger.info("Converted mmdit")
 
     if args.quantize_nbits is not None:
         logger.info(f"Quantizing weights to {args.quantize_nbits}-bit precision")
@@ -1383,6 +1487,7 @@ def parser_spec():
     parser.add_argument("--convert-vae-decoder", action="store_true")
     parser.add_argument("--convert-vae-encoder", action="store_true")
     parser.add_argument("--convert-unet", action="store_true")
+    parser.add_argument("--convert-mmdit", action="store_true")
     parser.add_argument("--convert-safety-checker", action="store_true")
     parser.add_argument(
         "--convert-controlnet", 
@@ -1489,6 +1594,7 @@ def parser_spec():
         "If specified, enable unet to receive additional inputs from controlnet. "
         "Each input added to corresponding resnet output."
         )
+    parser.add_argument("--include-t5", action="store_true")
 
     # Swift CLI Resource Bundling
     parser.add_argument(
@@ -1509,10 +1615,29 @@ def parser_spec():
         "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
         help="The URL to the merged pairs used in by the text tokenizer.")
     parser.add_argument(
+        "--text-encoder-t5-url",
+        default=
+        "https://huggingface.co/argmaxinc/coreml-stable-diffusion-3-medium/resolve/main/TextEncoderT5.mlmodelc",
+        help="The URL to the pre-converted T5 encoder model.")
+    parser.add_argument(
+        "--text-encoder-t5-config-url",
+        default=
+        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
+        help="The URL to the merged pairs used in by the text tokenizer.")
+    parser.add_argument(
+        "--text-encoder-t5-data-url",
+        default=
+        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
+        help="The URL to the merged pairs used in by the text tokenizer.")
+    parser.add_argument(
         "--xl-version",
         action="store_true",
         help=("If specified, the pre-trained model will be treated as an instantiation of "
         "`diffusers.pipelines.StableDiffusionXLPipeline` instead of `diffusers.pipelines.StableDiffusionPipeline`"))
+    parser.add_argument(
+        "--sd3-version",
+        action="store_true",
+        help=("If specified, the pre-trained model will be treated as an SD3 model."))
 
     return parser
 
