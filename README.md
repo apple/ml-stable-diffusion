@@ -254,31 +254,33 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 
 ### Model Conversion
 
-Stable Diffusion 3 uses some new and some old models to run. For the text encoders, the conversion can be done using a similar command as before
+Stable Diffusion 3 uses some new and some old models to run. For the text encoders, the conversion can be done using a similar command as before with the `--sd3-version` flag.
 
 ```bash
-python -m python_coreml_stable_diffusion.torch2coreml --convert-text-encoder --xl-version --model-version stabilityai/stable-diffusion-xl-base-1.0 --bundle-resources-for-swift-cli --attention-implementation ORIGINAL -o <output-dir>
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-text-encoder --sd3-version -o <output-dir>
 ```
 
-For the new models (MMDiT and a new VAE with 16 channels), the conversion can be done through the [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit) repo with the following commands:
+For the new models (MMDiT, a new VAE with 16 channels, and the T5 text encoder), there are a number of new CLI flags that utilize the [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit) repo:
+
+- `--sd3-version`: Indicates to the converter to treat this as a Stable Diffusion 3 model
+- `--convert-mmdit`: Convert the MMDiT model
+- `--convert-vae-decoder`: Convert the new VAE model (this will use the 16 channel version if --sd3-version is set)
+- `--include-t5`: Downloads and includes a pre-converted T5 text encoder in the conversion
+
+e.g.:
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-vae-decoder --convert-mmdit  --include-t5 --sd3-version -o <output-dir>
+```
+
+To convert the full pipeline with at 1024x1024 resolution, the following command may be used:
 
 ```bash
-git clone https://github.com/argmaxinc/DiffusionKit.git
-cd DiffusionKit
-pip install -e .
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-text-encoder --convert-vae-decoder --convert-mmdit --include-t5 --sd3-version --latent-h 128 --latent-w 128 -o <output-dir>
 ```
 
-Once installed, you can convert the MMDiT model using:
+Keep in mind that the MMDiT model is quite large and will require increasingly more memory and time to convert as the latent resolution increases.
 
-```bash
-python -m tests.torch2coreml.test_mmdit --sd3-ckpt-path <path-to-sd3-mmdit.safetensors> --model-version {2b} -o <output-mlpackages-directory> --latent-size {64, 128}
-```
-
-And similar for the new VAE model:
-
-```bash
-python -m tests.torch2coreml.test_vae --sd3-ckpt-path <path-to-sd3-mmdit.safetensors> -o <output-mlpackages-directory> --latent-size {64, 128}
-```
+Also note that currently the MMDiT model requires fp32 and therefore only supports `CPU_AND_GPU` compute units and `ORIGINAL` attention implementation (the default for this pipeline).
 
 ### Swift Inference
 

@@ -305,16 +305,16 @@ def bundle_resources_for_swift_cli(args):
             logger.info("Downloading pre-converted T5 encoder model TextEncoderT5.mlmodelc")
             _download_t5_model(args, t5_save_path)
             logger.info("Done")
-
-            # Fetch and save T5 text tokenizer JSON files
-            logger.info("Downloading and saving T5 tokenizer files tokenizer_config.json and tokenizer.json")
-            with open(os.path.join(resources_dir, "tokenizer_config.json"), "wb") as f:
-                f.write(requests.get(args.text_encoder_t5_config_url).content)
-            with open(os.path.join(resources_dir, "tokenizer.json"), "wb") as f:
-                f.write(requests.get(args.text_encoder_t5_data_url).content)
-            logger.info("Done")
         else:
             logger.info(f"Skipping T5 download as {t5_save_path} already exists")
+            
+        # Fetch and save T5 text tokenizer JSON files
+        logger.info("Downloading and saving T5 tokenizer files tokenizer_config.json and tokenizer.json")
+        with open(os.path.join(resources_dir, "tokenizer_config.json"), "wb") as f:
+            f.write(requests.get(args.text_encoder_t5_config_url).content)
+        with open(os.path.join(resources_dir, "tokenizer.json"), "wb") as f:
+            f.write(requests.get(args.text_encoder_t5_data_url).content)
+        logger.info("Done")
 
     return resources_dir
 
@@ -620,9 +620,43 @@ def convert_vae_decoder_sd3(args):
         output_dir=args.o,
     )
 
-    # Rename the output file to match the expected name
+    # Load converted model
+    coreml_vae_decoder = ct.models.MLModel(converted_vae_path)
+
+    # Set model metadata
+    coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
+    coreml_vae_decoder.license = "Stability AI Community License (https://huggingface.co/stabilityai/stable-diffusion-3-medium/blob/main/LICENSE.md)"
+    coreml_vae_decoder.version = args.model_version
+    coreml_vae_decodershort_description = \
+        "Stable Diffusion 3 generates images conditioned on text or other images as input through the diffusion process. " \
+        "Please refer to https://arxiv.org/pdf/2403.03206 for details."
+
+    # Set the input descriptions
+    coreml_vae_decoder.input_description["z"] = \
+        "The denoised latent embeddings from the unet model after the last step of reverse diffusion"
+
+    # Set the output descriptions
+    coreml_vae_decoder.output_description[
+        "image"] = "Generated image normalized to range [-1, 1]"
+
+    # Set package version metadata
+    from python_coreml_stable_diffusion._version import __version__
+    coreml_vae_decoder.user_defined_metadata["com.github.apple.ml-stable-diffusion.version"] = __version__
+    from diffusionkit.version import __version__
+    coreml_vae_decoder.user_defined_metadata["com.github.argmax.diffusionkit.version"] = __version__
+
+    # Save the updated model
+    coreml_vae_decoder.save(out_path)
+
+    logger.info(f"Saved vae_decoder into {out_path}")
+
+    # Delete the original file
     if os.path.exists(converted_vae_path):
-        os.rename(converted_vae_path, out_path)
+        shutil.rmtree(converted_vae_path)
+
+    del coreml_vae_decoder
+    gc.collect()
+
 
 def convert_vae_encoder(pipe, args):
     """ Converts the VAE Encoder component of Stable Diffusion
@@ -991,12 +1025,55 @@ def convert_mmdit(args):
         latent_h=args.latent_h, 
         latent_w=args.latent_w, 
         output_dir=args.o,
+        # FIXME: Hardcoding to CPU_AND_GPU since ANE doesn't support FLOAT32
+        compute_precision=ct.precision.FLOAT32,
+        compute_unit=ct.ComputeUnit.CPU_AND_GPU,
     )
 
-    # Rename the output file to match the expected name
-    if os.path.exists(converted_mmdit_path):
-        os.rename(converted_mmdit_path, out_path)
+    # Load converted model
+    coreml_mmdit = ct.models.MLModel(converted_mmdit_path)
 
+    # Set model metadata
+    coreml_mmdit.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
+    coreml_mmdit.license = "Stability AI Community License (https://huggingface.co/stabilityai/stable-diffusion-3-medium/blob/main/LICENSE.md)"
+    coreml_mmdit.version = args.model_version
+    coreml_mmdit.short_description = \
+    "Stable Diffusion 3 generates images conditioned on text or other images as input through the diffusion process. " \
+    "Please refer to https://arxiv.org/pdf/2403.03206 for details."
+
+    # Set the input descriptions
+    coreml_mmdit.input_description["latent_image_embeddings"] = \
+        "The low resolution latent feature maps being denoised through reverse diffusion"
+    coreml_mmdit.input_description["token_level_text_embeddings"] = \
+        "Output embeddings from the associated text_encoder model to condition to generated image on text. " \
+        "A maximum of 77 tokens (~40 words) are allowed. Longer text is truncated. "
+    coreml_mmdit.input_description["pooled_text_embeddings"] = \
+        "Additional embeddings that if specified are added to the embeddings that are passed along to the MMDiT model."
+    coreml_mmdit.input_description["timestep"] = \
+        "A value emitted by the associated scheduler object to condition the model on a given noise schedule"
+    
+    # Set the output descriptions
+    coreml_mmdit.output_description["denoiser_output"] = \
+        "Same shape and dtype as the `latent_image_embeddings` input. " \
+        "The predicted noise to facilitate the reverse diffusion (denoising) process"
+
+    # Set package version metadata
+    from python_coreml_stable_diffusion._version import __version__
+    coreml_mmdit.user_defined_metadata["com.github.apple.ml-stable-diffusion.version"] = __version__
+    from diffusionkit.version import __version__
+    coreml_mmdit.user_defined_metadata["com.github.argmax.diffusionkit.version"] = __version__
+
+    # Save the updated model
+    coreml_mmdit.save(out_path)
+
+    logger.info(f"Saved vae_decoder into {out_path}")
+
+    # Delete the original file
+    if os.path.exists(converted_mmdit_path):
+        shutil.rmtree(converted_mmdit_path)
+
+    del coreml_mmdit
+    gc.collect()
 
 def convert_safety_checker(pipe, args):
     """ Converts the Safety Checker component of Stable Diffusion
@@ -1379,7 +1456,10 @@ def get_pipeline(args):
                                             use_auth_token=True)
     elif args.sd3_version:
         # SD3 uses standard SDXL diffusers pipeline besides the vae, denoiser, and T5 text encoder
-        pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0",
+        sdxl_base_version = "stabilityai/stable-diffusion-xl-base-1.0"
+        args.xl_version = True
+        logger.info(f"SD3 version specified, initializing DiffusionPipeline with {sdxl_base_version} for non-SD3 components..")
+        pipe = DiffusionPipeline.from_pretrained(sdxl_base_version,
                                             torch_dtype=torch.float16,
                                             variant="fp16",
                                             use_safetensors=True,
@@ -1622,12 +1702,12 @@ def parser_spec():
     parser.add_argument(
         "--text-encoder-t5-config-url",
         default=
-        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
+        "https://huggingface.co/google-t5/t5-small/resolve/main/tokenizer_config.json",
         help="The URL to the merged pairs used in by the text tokenizer.")
     parser.add_argument(
         "--text-encoder-t5-data-url",
         default=
-        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
+        "https://huggingface.co/google-t5/t5-small/resolve/main/tokenizer.json",
         help="The URL to the merged pairs used in by the text tokenizer.")
     parser.add_argument(
         "--xl-version",
