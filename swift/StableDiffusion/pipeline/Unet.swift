@@ -114,7 +114,7 @@ public struct Unet: ResourceManaging {
         let batch = MLArrayBatchProvider(array: inputs)
 
         // Make predictions
-        let results = try predictions(from: batch)
+        let results = try models.predictions(from: batch)
 
         // Pull out the results in Float32 format
         let noise = (0..<results.count).map { i in
@@ -173,7 +173,7 @@ public struct Unet: ResourceManaging {
         let batch = MLArrayBatchProvider(array: inputs)
 
         // Make predictions
-        let results = try predictions(from: batch)
+        let results = try models.predictions(from: batch)
 
         // Pull out the results in Float32 format
         let noise = (0..<results.count).map { i in
@@ -195,52 +195,5 @@ public struct Unet: ResourceManaging {
         }
 
         return noise
-    }
-
-    func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
-
-        var results = try models.first!.perform { model in
-            try model.predictions(fromBatch: batch)
-        }
-
-        if models.count == 1 {
-            return results
-        }
-
-        // Manual pipeline batch prediction
-        let inputs = batch.arrayOfFeatureValueDictionaries
-        for stage in models.dropFirst() {
-
-            // Combine the original inputs with the outputs of the last stage
-            let next = try results.arrayOfFeatureValueDictionaries
-                .enumerated().map { (index, dict) in
-                    let nextDict =  dict.merging(inputs[index]) { (out, _) in out }
-                    return try MLDictionaryFeatureProvider(dictionary: nextDict)
-            }
-            let nextBatch = MLArrayBatchProvider(array: next)
-
-            // Predict
-            results = try stage.perform { model in
-                try model.predictions(fromBatch: nextBatch)
-            }
-        }
-
-        return results
-    }
-}
-
-extension MLFeatureProvider {
-    var featureValueDictionary: [String : MLFeatureValue] {
-        self.featureNames.reduce(into: [String : MLFeatureValue]()) { result, name in
-            result[name] = self.featureValue(for: name)
-        }
-    }
-}
-
-extension MLBatchProvider {
-    var arrayOfFeatureValueDictionaries: [[String : MLFeatureValue]] {
-        (0..<self.count).map {
-            self.features(at: $0).featureValueDictionary
-        }
     }
 }

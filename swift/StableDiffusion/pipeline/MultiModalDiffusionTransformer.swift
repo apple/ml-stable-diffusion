@@ -99,7 +99,7 @@ public struct MultiModalDiffusionTransformer: ResourceManaging {
         let batch = MLArrayBatchProvider(array: inputs)
 
         // Make predictions
-        let results = try predictions(from: batch)
+        let results = try models.predictions(from: batch)
 
         // Pull out the results in Float32 format
         let noise = (0..<results.count).map { i in
@@ -121,34 +121,5 @@ public struct MultiModalDiffusionTransformer: ResourceManaging {
         }
 
         return noise
-    }
-
-    func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
-        var results = try models.first!.perform { model in
-            try model.predictions(fromBatch: batch)
-        }
-
-        if models.count == 1 {
-            return results
-        }
-
-        // Manual pipeline batch prediction
-        let inputs = batch.arrayOfFeatureValueDictionaries
-        for stage in models.dropFirst() {
-            // Combine the original inputs with the outputs of the last stage
-            let next = try results.arrayOfFeatureValueDictionaries
-                .enumerated().map { index, dict in
-                    let nextDict = dict.merging(inputs[index]) { out, _ in out }
-                    return try MLDictionaryFeatureProvider(dictionary: nextDict)
-                }
-            let nextBatch = MLArrayBatchProvider(array: next)
-
-            // Predict
-            results = try stage.perform { model in
-                try model.predictions(fromBatch: nextBatch)
-            }
-        }
-
-        return results
     }
 }

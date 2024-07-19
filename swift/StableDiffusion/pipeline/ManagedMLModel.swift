@@ -72,6 +72,56 @@ public final class ManagedMLModel: ResourceManaging {
                                       configuration: configuration)
         }
     }
+}
 
+@available(iOS 16.2, macOS 13.1, *)
+public extension Array where Element == ManagedMLModel {
+    /// Performs batch predictions using an array of `[ManagedMLModel]` instances in a pipeline.
+    /// - Parameter batch: Inputs for btached predictions.
+    /// - Returns: Final prediction results after processing through all models.
+    /// - Throws: Errors if the array is empty, predictions fail, or results can't be combined.
+    func predictions(from batch: MLBatchProvider) throws -> MLBatchProvider {
+        var results = try self.first!.perform { model in
+            try model.predictions(fromBatch: batch)
+        }
 
+        if self.count == 1 {
+            return results
+        }
+
+        // Manual pipeline batch prediction
+        let inputs = batch.arrayOfFeatureValueDictionaries
+        for stage in self.dropFirst() {
+            // Combine the original inputs with the outputs of the last stage
+            let next = try results.arrayOfFeatureValueDictionaries
+                .enumerated().map { index, dict in
+                    let nextDict = dict.merging(inputs[index]) { out, _ in out }
+                    return try MLDictionaryFeatureProvider(dictionary: nextDict)
+                }
+            let nextBatch = MLArrayBatchProvider(array: next)
+
+            // Predict
+            results = try stage.perform { model in
+                try model.predictions(fromBatch: nextBatch)
+            }
+        }
+
+        return results
+    }
+}
+
+extension MLFeatureProvider {
+    var featureValueDictionary: [String : MLFeatureValue] {
+        self.featureNames.reduce(into: [String : MLFeatureValue]()) { result, name in
+            result[name] = self.featureValue(for: name)
+        }
+    }
+}
+
+extension MLBatchProvider {
+    var arrayOfFeatureValueDictionaries: [[String : MLFeatureValue]] {
+        (0..<self.count).map {
+            self.features(at: $0).featureValueDictionary
+        }
+    }
 }
