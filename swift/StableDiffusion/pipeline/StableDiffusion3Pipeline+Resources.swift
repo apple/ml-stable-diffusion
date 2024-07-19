@@ -73,7 +73,7 @@ public extension StableDiffusion3Pipeline {
         let mmdit = MultiModalDiffusionTransformer(modelAt: urls.mmditURL, configuration: config)
 
         // Image Decoder
-        let decoder = DecoderSD3(modelAt: urls.decoderURL, configuration: config)
+        let decoder = Decoder(modelAt: urls.decoderURL, configuration: config)
 
         // Optional Image Encoder
         let encoder: Encoder?

@@ -21,7 +21,7 @@ public struct StableDiffusion3Pipeline: StableDiffusionPipelineProtocol {
     var mmdit: MultiModalDiffusionTransformer
 
     /// Model used to generate final image from latent diffusion process
-    var decoder: DecoderSD3
+    var decoder: Decoder
 
     /// Model used to latent space for image2image, and soon, in-painting
     var encoder: Encoder?
@@ -48,7 +48,7 @@ public struct StableDiffusion3Pipeline: StableDiffusionPipelineProtocol {
         textEncoder2: TextEncoderXLModel,
         textEncoderT5: TextEncoderT5?,
         mmdit: MultiModalDiffusionTransformer,
-        decoder: DecoderSD3,
+        decoder: Decoder,
         encoder: Encoder?,
         reduceMemory: Bool = false
     ) {
