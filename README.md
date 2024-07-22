@@ -290,20 +290,6 @@ Swift inference for Stable Diffusion 3 is similar to the previous versions. The 
 swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units cpuAndGPU --sd3
 ```
 
-### Python MLX Inference
-
-Python inference is supported via the [MLX](https://github.com/ml-explore) backend in [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit). The following command can be used to generate images using Stable Diffusion 3:
-
-```bash
-diffusionkit-cli --prompt "a photo of a cat" --output-path </path/to/output/image.png> --seed 0 -w16 -a16
-```
-
-Some notable optional arguments:
-
-- For image-to-image, use --image-path (path to input image) and --denoise (value between 0. and 1.)
-- T5 text embeddings, use --t5
-- For different resolutions, use --height and --width
-
 </details>
 
 ## <a name="using-stable-diffusion-xl"></a> Using Stable Diffusion XL
