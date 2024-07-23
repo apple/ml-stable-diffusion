@@ -246,6 +246,52 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 
 </details>
 
+
+## <a name="using-stable-diffusion-3"></a> Using Stable Diffusion 3
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+### Model Conversion
+
+Stable Diffusion 3 uses some new and some old models to run. For the text encoders, the conversion can be done using a similar command as before with the `--sd3-version` flag.
+
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-text-encoder --sd3-version -o <output-dir>
+```
+
+For the new models (MMDiT, a new VAE with 16 channels, and the T5 text encoder), there are a number of new CLI flags that utilize the [DiffusionKit](https://www.github.com/argmaxinc/DiffusionKit) repo:
+
+- `--sd3-version`: Indicates to the converter to treat this as a Stable Diffusion 3 model
+- `--convert-mmdit`: Convert the MMDiT model
+- `--convert-vae-decoder`: Convert the new VAE model (this will use the 16 channel version if --sd3-version is set)
+- `--include-t5`: Downloads and includes a pre-converted T5 text encoder in the conversion
+
+e.g.:
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-vae-decoder --convert-mmdit  --include-t5 --sd3-version -o <output-dir>
+```
+
+To convert the full pipeline with at 1024x1024 resolution, the following command may be used:
+
+```bash
+python -m python_coreml_stable_diffusion.torch2coreml --model-version stabilityai/stable-diffusion-3-medium --bundle-resources-for-swift-cli --convert-text-encoder --convert-vae-decoder --convert-mmdit --include-t5 --sd3-version --latent-h 128 --latent-w 128 -o <output-dir>
+```
+
+Keep in mind that the MMDiT model is quite large and will require increasingly more memory and time to convert as the latent resolution increases.
+
+Also note that currently the MMDiT model requires fp32 and therefore only supports `CPU_AND_GPU` compute units and `ORIGINAL` attention implementation (the default for this pipeline).
+
+### Swift Inference
+
+Swift inference for Stable Diffusion 3 is similar to the previous versions. The only difference is that the `--sd3` flag should be used to indicate that the model is a Stable Diffusion 3 model.
+
+```bash
+swift run StableDiffusionSample <prompt> --resource-path <output-mlpackages-directory/Resources> --output-path <output-dir> --compute-units cpuAndGPU --sd3
+```
+
+</details>
+
 ## <a name="using-stable-diffusion-xl"></a> Using Stable Diffusion XL
 
 <details>
@@ -356,6 +402,7 @@ Resources:
   - [`stabilityai/stable-diffusion-2-1-base`](https://huggingface.co/apple/coreml-stable-diffusion-2-1-base)
   - [`stabilityai/stable-diffusion-xl-base-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base)
   - [`stabilityai/stable-diffusion-xl-{base+refiner}-1.0`](https://huggingface.co/apple/coreml-stable-diffusion-xl-base-with-refiner)
+  - [`stabilityai/stable-diffusion-3-medium`](https://huggingface.co/stabilityai/stable-diffusion-3-medium)
 
 If you want to use any of those models you may download the weights and proceed to [generate images with Python](#image-generation-with-python) or [Swift](#image-generation-with-swift).
 

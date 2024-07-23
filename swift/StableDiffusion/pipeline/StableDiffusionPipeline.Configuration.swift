@@ -46,12 +46,16 @@ public struct PipelineConfiguration: Hashable {
     public var schedulerType: StableDiffusionScheduler = .pndmScheduler
     /// The spacing to use for scheduler sigmas and time steps. Only supported when using `.dpmppScheduler`.
     public var schedulerTimestepSpacing: TimeStepSpacing = .linspace
+    /// Resolution dependent shifting of timestep schedules
+    public var schedulerTimestepShift: Float = 3.0
     /// The type of RNG to use
     public var rngType: StableDiffusionRNG = .numpyRNG
     /// Scale factor to use on the latent after encoding
     public var encoderScaleFactor: Float32 = 0.18215
     /// Scale factor to use on the latent before decoding
     public var decoderScaleFactor: Float32 = 0.18215
+    /// Shift factor to use on the latent before decoding
+    public var decoderShiftFactor: Float32 = 0.0
     /// If `originalSize` is not the same as `targetSize` the image will appear to be down- or upsampled.
     /// Part of SDXL’s micro-conditioning as explained in section 2.2 of https://huggingface.co/papers/2307.01952.
     public var originalSize: Float32 = 1024

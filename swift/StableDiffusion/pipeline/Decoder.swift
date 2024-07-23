@@ -1,5 +1,5 @@
 // For licensing see accompanying LICENSE.md file.
-// Copyright (C) 2022 Apple Inc. All Rights Reserved.
+// Copyright (C) 2024 Apple Inc. All Rights Reserved.
 
 import Foundation
 import CoreML
@@ -28,7 +28,7 @@ public struct Decoder: ResourceManaging {
 
     /// Unload the underlying model to free up memory
     public func unloadResources() {
-       model.unloadResources()
+        model.unloadResources()
     }
 
     /// Batch decode latent samples into images
@@ -39,14 +39,15 @@ public struct Decoder: ResourceManaging {
     ///  - Returns: decoded images
     public func decode(
         _ latents: [MLShapedArray<Float32>],
-        scaleFactor: Float32
+        scaleFactor: Float32,
+        shiftFactor: Float32 = 0.0
     ) throws -> [CGImage] {
 
         // Form batch inputs for model
         let inputs: [MLFeatureProvider] = try latents.map { sample in
             // Reference pipeline scales the latent samples before decoding
             let sampleScaled = MLShapedArray<Float32>(
-                scalars: sample.scalars.map { $0 / scaleFactor },
+                scalars: sample.scalars.map { $0 / scaleFactor + shiftFactor },
                 shape: sample.shape)
 
             let dict = [inputName: MLMultiArray(sampleScaled)]
