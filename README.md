@@ -591,6 +591,51 @@ Hugging Face has made the app [available in the Mac App Store](https://apps.appl
 </details>
 
 
+
+## <a name="play-with-simple-web-ui"></a> Play with simple Web UI
+
+<details>
+  <summary> Click to expand </summary>
+
+<img src="assets/webui.jpg">
+
+After you have completed the model conversion according to the above process, you can use the following command to start a simple Web UI:
+
+```bash
+python -m python_coreml_stable_diffusion.web -i <output-mlpackages-directory> --compute-unit ALL
+```
+
+After the command is executed, we will get a log similar to the following:
+
+```bash
+WARNING:coremltools:Torch version 1.13.0 has not been tested with coremltools. You may run into unexpected errors. Torch 1.12.1 is the most recent version that has been tested.
+INFO:python_coreml_stable_diffusion.pipeline:Initializing PyTorch pipe for reference configuration
+...
+...
+INFO:python_coreml_stable_diffusion.pipeline:Done.
+INFO:python_coreml_stable_diffusion.pipeline:Initializing Core ML pipe for image generation
+INFO:python_coreml_stable_diffusion.pipeline:Stable Diffusion configured to generate 512x512 images
+INFO:python_coreml_stable_diffusion.pipeline:Done.
+Running on local URL:  http://0.0.0.0:7860
+
+To create a public link, set `share=True` in `launch()`.
+```
+
+Open `http://0.0.0.0:7860` in your browser to start your Core ML Stable Diffusion adventure.
+
+
+Web UI relies on gradio, a great interface framework. If you have not installed it, then execute the above command, the program will try to install it automatically.
+
+If the installation fails, you can try to manually execute the following command to complete the dependency installation.
+
+```bash
+pip install gradio
+```
+
+When the installation is complete, re-execute the above command to start the Web UI.
+
+</details>
+
 ##  <a name="faq"></a> FAQ
 
 <details>
