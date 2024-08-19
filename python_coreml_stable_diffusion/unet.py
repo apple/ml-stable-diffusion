@@ -14,7 +14,6 @@ from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
-logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 import math
