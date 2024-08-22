@@ -231,7 +231,7 @@ def _make_second_chunk_prog(prog, op_idx):
     return prog
 
 
-def _legancy_model_chunking(args):
+def _legacy_model_chunking(args):
     # TODO: Remove this method after setting the coremltools dependency >= 8.0
     os.makedirs(args.o, exist_ok=True)
 
@@ -344,13 +344,13 @@ def main(args):
 
     if ct_version != "8.0b2" and ct_version < "8.0":
         # With coremltools version <= 8.0b1,
-        # we use the lagancy implementation.
+        # we use the legacy implementation.
         # TODO: Remove the logic after setting the coremltools dependency >= 8.0.
         logger.info(
             f"coremltools version {ct_version} detected. Recommended upgrading the package version to "
             f"'8.0b2' when you running chunk_mlprogram.py script for the latest supports and bug fixes."
         )
-        _legancy_model_chunking(args)
+        _legacy_model_chunking(args)
     else:
         # Starting from coremltools==8.0b2, there is this `bisect_model` API that
         # we can directly call into.
