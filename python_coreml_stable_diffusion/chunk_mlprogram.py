@@ -101,6 +101,7 @@ def _get_op_idx_split_location(prog: Program):
     """ Find the op that approximately bisects the graph as measure by weights size on each side
     """
     main_block = prog.functions["main"]
+    main_block.operations = list(main_block.operations)
     total_size_in_mb = 0
 
     for op in main_block.operations:
@@ -132,6 +133,7 @@ def _get_first_chunk_outputs(block, op_idx):
     # to the second program (all ops from op_idx+1 till the end). These all vars need to be made the output
     # of the first program and the input of the second program
     boundary_vars = set()
+    block.operations = list(block.operations)
     for i in range(op_idx + 1):
         op = block.operations[i]
         if not op.op_type.startswith("const"):
@@ -181,6 +183,7 @@ def _make_second_chunk_prog(prog, op_idx):
     boundary_vars = _get_first_chunk_outputs(block, op_idx)
 
     # This op will not be included in this program. Its output var will be made into an input
+    block.operations = list(block.operations)
     boundary_op = block.operations[op_idx]
 
     # Add all boundary ops as inputs
@@ -228,7 +231,8 @@ def _make_second_chunk_prog(prog, op_idx):
     return prog
 
 
-def main(args):
+def _legancy_model_chunking(args):
+    # TODO: Remove this method after setting the coremltools dependency >= 8.0
     os.makedirs(args.o, exist_ok=True)
 
     # Check filename extension
@@ -307,13 +311,6 @@ def main(args):
             second_chunk_model=model_chunk2,
         )
 
-    # Remove original (non-chunked) model if requested
-    if args.remove_original:
-        logger.info(
-            "Removing original (non-chunked) model at {args.mlpackage_path}")
-        shutil.rmtree(args.mlpackage_path)
-        logger.info("Done.")
-
     if args.merge_chunks_in_pipeline_model:
         # Make a single pipeline model to manage the model chunks
         pipeline_model = ct.utils.make_pipeline(model_chunk1, model_chunk2)
@@ -339,6 +336,37 @@ def main(args):
         )
         model_chunk1.save(out_path_chunk1)
         model_chunk2.save(out_path_chunk2)
+        logger.info("Done.")
+
+
+def main(args):
+    ct_version = ct.__version__
+
+    if ct_version != "8.0b2" and ct_version < "8.0":
+        # With coremltools version <= 8.0b1,
+        # we use the lagancy implementation.
+        # TODO: Remove the logic after setting the coremltools dependency >= 8.0.
+        logger.info(
+            f"coremltools version {ct_version} detected. Recommended upgrading the package version to "
+            f"'8.0b2' when you running chunk_mlprogram.py script for the latest supports and bug fixes."
+        )
+        _legancy_model_chunking(args)
+    else:
+        # Starting from coremltools==8.0b2, there is this `bisect_model` API that
+        # we can directly call into.
+        from coremltools.models.utils import bisect_model
+        ct.models.utils.bisect_model(
+            model=args.mlpackage_path,
+            output_dir=args.o,
+            merge_chunks_to_pipeline=args.merge_chunks_in_pipeline_model,
+            check_output_correctness=args.check_output_correctness,
+        )
+
+    # Remove original (non-chunked) model if requested
+    if args.remove_original:
+        logger.info(
+            "Removing original (non-chunked) model at {args.mlpackage_path}")
+        shutil.rmtree(args.mlpackage_path)
         logger.info("Done.")
 
 
