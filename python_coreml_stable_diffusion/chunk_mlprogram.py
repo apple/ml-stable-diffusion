@@ -355,12 +355,14 @@ def main(args):
         # Starting from coremltools==8.0b2, there is this `bisect_model` API that
         # we can directly call into.
         from coremltools.models.utils import bisect_model
+        logger.info(f"Start chunking model {args.mlpackage_path} into two pieces.")
         ct.models.utils.bisect_model(
             model=args.mlpackage_path,
             output_dir=args.o,
             merge_chunks_to_pipeline=args.merge_chunks_in_pipeline_model,
             check_output_correctness=args.check_output_correctness,
         )
+        logger.info(f"Model chunking is done.")
 
     # Remove original (non-chunked) model if requested
     if args.remove_original:
