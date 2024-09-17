@@ -1,8 +1,8 @@
-coremltools>=7.0
-diffusers[torch]
-diffusionkit
+coremltools>=8.0
+diffusers[torch]==0.30.2
+diffusionkit==0.4.0
 torch
-transformers==4.29.2
+transformers==4.44.2
 scipy
 scikit-learn
 pytest
