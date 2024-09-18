@@ -604,8 +604,7 @@ def get_coreml_pipe(pytorch_pipe,
             "tokenizer": pytorch_pipe.tokenizer,
             'tokenizer_2': pytorch_pipe.tokenizer_2,
             "scheduler": pytorch_pipe.scheduler if scheduler_override is None else scheduler_override,
-            "force_zeros_for_empty_prompt": force_zeros_for_empty_prompt,
-            'xl': True
+            'xl': True,
         }
 
         model_packages_to_load = ["text_encoder", "text_encoder_2", "unet", "vae_decoder"]
@@ -617,6 +616,8 @@ def get_coreml_pipe(pytorch_pipe,
             "feature_extractor": pytorch_pipe.feature_extractor,
         }
         model_packages_to_load = ["text_encoder", "unet", "vae_decoder"]
+
+    coreml_pipe_kwargs["force_zeros_for_empty_prompt"] = force_zeros_for_empty_prompt
 
     if getattr(pytorch_pipe, "safety_checker", None) is not None:
         model_packages_to_load.append("safety_checker")
@@ -713,7 +714,7 @@ def main(args):
 
     # Get Force Zeros Config if it exists
     force_zeros_for_empty_prompt: bool = False
-    if 'force_zeros_for_empty_prompt' in pytorch_pipe.config:
+    if 'xl' in args.model_version and 'force_zeros_for_empty_prompt' in pytorch_pipe.config:
         force_zeros_for_empty_prompt = pytorch_pipe.config['force_zeros_for_empty_prompt']
 
     coreml_pipe = get_coreml_pipe(
