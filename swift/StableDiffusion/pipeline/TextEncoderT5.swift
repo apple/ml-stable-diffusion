@@ -83,23 +83,22 @@ public struct TextEncoderT5: TextEncoderT5Model {
         let bosToken = tokenizer.bosTokenId ?? 0
         let eosToken = tokenizer.eosTokenId ?? 1
         let padToken = bosToken
-        let maskToken = eosToken
+        let maskToken = -Float32.greatestFiniteMagnitude
 
         // Truncate and pad input to the expected length
         let truncatedIds = ids.prefix(inputLength - 1) + [eosToken]
         let inputIds = truncatedIds + Array(repeating: padToken, count: inputLength - truncatedIds.count)
 
         let attentionMaskName = "attention_mask"
-        var attentionMask: [Int] = inputIds.map { token in
-            token == padToken ? maskToken : padToken
+        var attentionMask: [Float32] = inputIds.map { token in
+            token == padToken ? maskToken : 0.0
         }
-        attentionMask[0] = bosToken
+        attentionMask[0] = 0.0
 
         let floatIds = inputIds.map { Float32($0) }
-        let floatMask = attentionMask.map { Float32($0) }
 
         let inputArray = MLShapedArray<Float32>(scalars: floatIds, shape: inputShape)
-        let maskArray = MLShapedArray<Float32>(scalars: floatMask, shape: inputShape)
+        let maskArray = MLShapedArray<Float32>(scalars: attentionMask, shape: inputShape)
         let inputFeatures = try! MLDictionaryFeatureProvider(
             dictionary: [inputName: MLMultiArray(inputArray),
                          attentionMaskName: MLMultiArray(maskArray)])
