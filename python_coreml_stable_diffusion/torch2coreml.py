@@ -757,7 +757,7 @@ def convert_vae_encoder(pipe, args):
     gc.collect()
 
 
-def convert_unet(pipe, args, model_name = None):
+def convert_unet(pipe, args, model_name=None):
     """ Converts the UNet component of Stable Diffusion
     """
     if args.unet_support_controlnet:
@@ -783,6 +783,8 @@ def convert_unet(pipe, args, model_name = None):
     elif not os.path.exists(out_path):
         # Prepare sample input shapes and values
         batch_size = 2  # for classifier-free guidance
+        if args.unet_batch_one:
+            batch_size = 1  # for not using classifier-free guidance
         sample_shape = (
             batch_size,                    # B
             pipe.unet.config.in_channels,  # C
@@ -1673,6 +1675,13 @@ def parser_spec():
         help=
         "If specified, enable unet to receive additional inputs from controlnet. "
         "Each input added to corresponding resnet output."
+        )
+    parser.add_argument(
+        "--unet-batch-one",
+        action="store_true",
+        help=
+        "If specified, a batch size of one will be used for the unet, this is needed if you do not want to do "
+        "classifier free guidance. Default unet batch size is two, which is needed for classifier free guidance."
         )
     parser.add_argument("--include-t5", action="store_true")
 

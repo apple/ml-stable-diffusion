@@ -506,11 +506,16 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             if isinstance(latent_model_input, torch.Tensor):
                 latent_model_input = latent_model_input.numpy()
 
+            if do_classifier_free_guidance:
+                timestep = np.array([t, t], np.float16)
+            else:
+                timestep = np.array([t,], np.float16)
+
             # controlnet
             if controlnet_cond:
                 control_net_additional_residuals = self.run_controlnet(
                     sample=latent_model_input,
-                    timestep=np.array([t, t]),
+                    timestep=timestep,
                     encoder_hidden_states=text_embeddings,
                     controlnet_cond=controlnet_cond,
                 )
@@ -522,7 +527,7 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
 
             noise_pred = self.unet(
                 sample=latent_model_input.astype(np.float16),
-                timestep=np.array([t, t], np.float16),
+                timestep=timestep,
                 encoder_hidden_states=text_embeddings.astype(np.float16),
                 **unet_additional_kwargs,
             )["noise_pred"]

@@ -490,6 +490,8 @@ This generally takes 15-20 minutes on an M1 MacBook Pro. Upon successful executi
 
 - `--unet-support-controlnet`: enables a converted UNet model to receive additional inputs from ControlNet. This is required for generating image with using ControlNet and saved with a different name, `*_control-unet.mlpackage`, distinct from normal UNet. On the other hand, this UNet model can not work without ControlNet. Please use normal UNet for just txt2img.
 
+- `--unet-batch-one`: use a batch size of one for the unet, this is needed if you do not want to do classifier free guidance, i.e. using a `guidance-scale` of less than one.
+
 - `--convert-vae-encoder`: not required for text-to-image applications. Required for image-to-image applications in order to map the input image to the latent space.
 
 </details>
