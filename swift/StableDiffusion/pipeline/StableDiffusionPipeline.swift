@@ -210,22 +210,24 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
         progressHandler: (Progress) -> Bool = { _ in true }
     ) throws -> [CGImage?] {
 
-        // Encode the input prompt and negative prompt
-        let promptEmbedding = try textEncoder.encode(config.prompt)
-        let negativePromptEmbedding = try textEncoder.encode(config.negativePrompt)
+        // Encode the input prompt
+        var promptEmbedding = try textEncoder.encode(config.prompt)
+
+        if config.guidanceScale >= 1.0 {
+            // Convert to Unet hidden state representation
+            // Concatenate the prompt and negative prompt embeddings
+            let negativePromptEmbedding = try textEncoder.encode(config.negativePrompt)
+            promptEmbedding = MLShapedArray<Float32>(
+                concatenating: [negativePromptEmbedding, promptEmbedding],
+                alongAxis: 0
+            )
+        }
 
         if reduceMemory {
             textEncoder.unloadResources()
         }
 
-        // Convert to Unet hidden state representation
-        // Concatenate the prompt and negative prompt embeddings
-        let concatEmbedding = MLShapedArray<Float32>(
-            concatenating: [negativePromptEmbedding, promptEmbedding],
-            alongAxis: 0
-        )
-
-        let hiddenStates = useMultilingualTextEncoder ? concatEmbedding : toHiddenStates(concatEmbedding)
+        let hiddenStates = useMultilingualTextEncoder ? promptEmbedding : toHiddenStates(promptEmbedding)
 
         /// Setup schedulers
         let scheduler: [Scheduler] = (0..<config.imageCount).map { _ in
@@ -262,8 +264,13 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
 
             // Expand the latents for classifier-free guidance
             // and input to the Unet noise prediction model
-            let latentUnetInput = latents.map {
-                MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
+            let latentUnetInput: [MLShapedArray<Float32>]
+            if config.guidanceScale >= 1.0 {
+                latentUnetInput = latents.map {
+                    MLShapedArray<Float32>(concatenating: [$0, $0], alongAxis: 0)
+                }
+            } else {
+                latentUnetInput = latents
             }
 
             // Before Unet, execute controlNet and add the output into Unet inputs
@@ -283,7 +290,9 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
                 additionalResiduals: additionalResiduals
             )
 
-            noise = performGuidance(noise, config.guidanceScale)
+            if config.guidanceScale >= 1.0 {
+                noise = performGuidance(noise, config.guidanceScale)
+            }
 
             // Have the scheduler compute the previous (t-1) latent
             // sample given the predicted noise and current sample
