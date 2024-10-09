@@ -578,6 +578,11 @@ if __name__ == "__main__":
          "If specified, the specified VAE will be converted instead of the one associated to the `--model-version` checkpoint. "
          "No precision override is applied when using a custom VAE."
          ))
+    # needed since this calls `torch2coreml` and that would throw an error
+    parser.add_argument(
+        "--sd3-version",
+        action="store_true",
+        help=("If specified, the pre-trained model will be treated as an SD3 model."))
 
     args = parser.parse_args()
     main(args)
