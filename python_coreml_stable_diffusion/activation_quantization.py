@@ -28,7 +28,6 @@ from python_coreml_stable_diffusion.unet import Einsum
 CALIBRATION_DATA = [
     "image of a transparent tall glass with ice, fruits and mint, photograph, commercial, food, warm background, beautiful image, detailed",
     "picture of dimly lit living room, minimalist furniture, vaulted ceiling, huge room, floor to ceiling window with an ocean view, nighttime, 3D render, high quality, detailed",
-    "fantasy medieval village, high detail, fantasy, realistic, light effect, hyper detail, volumetric lighting, cinematic, macro, depth of field, blur, highly detailed, epic, cinematic concept art, excellent composition, dynamic dramatic cinematic lighting, aesthetic, very inspirational",
     "modern office building, 8 stories tall, glass and steel, 3D render style, wide angle view, very detailed, sharp photographic image, in an office park, bright sunny day, clear blue skies, trees and landscaping",
     "cute small cat sitting in a movie theater eating popcorn, watching a movie, cozy indoor lighting, detailed, digital painting, character design",
     "a highly detailed matte painting of a man on a hill watching a rocket launch in the distance by studio ghibli, volumetric lighting, octane render, 4K resolution, hyperrealism, highly detailed, insanely detailed, cinematic lighting, depth of field",
@@ -184,8 +183,9 @@ def generate_calibration_data(pipe, args):
     Path(calibration_dir).mkdir(exist_ok=True)
 
     for prompt in CALIBRATION_DATA:
+        gen = torch.manual_seed(args.seed)
         # run forward pass
-        pipe(prompt=prompt)
+        pipe(prompt=prompt, generator=gen)
         # save unet inputs
         filename = "_".join(prompt.split(" ")) + "_" + str(args.seed) + ".pkl"
         filepath = os.path.join(args.o, calibration_dir, filename)
@@ -218,11 +218,13 @@ def prepare_pipe(pipe, unet):
     return new_pipe, pre_hook_handle
 
 def run_pipe(pipe):
+    gen = torch.manual_seed(args.seed)
     kwargs = dict(
         prompt=RANDOM_TEST_DATA,
         negative_prompt=[""] * len(RANDOM_TEST_DATA),
         num_inference_steps=1,
         output_type="latent",
+        generator=gen,
     )
     return np.array([latent.cpu().numpy() for latent in pipe(**kwargs).images])
 
@@ -249,10 +251,6 @@ def get_reference_pipeline(model_version):
     return ref_pipe
 
 def main(args):
-    torch.manual_seed(args.seed)
-
-    dataloader = unet_data_loader("./calibration_data_stabilityai-stable-diffusion-2-1-base", 'cpu')
-
     # Initialize reference pipeline
     ref_pipe = get_reference_pipeline(args.model_version)
     if torch.cuda.is_available():
@@ -285,7 +283,7 @@ def main(args):
         }
         json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
         calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
-        dataloader = unet_data_loader(calibration_dir)
+        dataloader = unet_data_loader(calibration_dir, device)
 
         for module_type, module_name in quantizable_modules:
             logger.info(f"Quantizing Unet Layer: {module_name}")
@@ -311,7 +309,7 @@ def main(args):
     if args.quantize_pytorch:
         logger.info(f"Quantizing Unet PyTorch model")
         calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
-        dataloader = unet_data_loader(calibration_dir)
+        dataloader = unet_data_loader(calibration_dir, device)
 
         json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
         with open(os.path.join(args.o, json_name), "r") as f:
