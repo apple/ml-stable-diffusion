@@ -43,6 +43,28 @@ WARN_MSG = \
     "This `nn.Module` is intended for Apple Silicon deployment only. " \
     "PyTorch-specific optimizations and training is disabled"
 
+class Einsum(nn.Module):
+    def __init__(self, heads, dim_head):
+        super().__init__()
+        self.heads = heads
+        self.dim_head = dim_head
+
+    def forward(self, q, k, v, mask):
+        if ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.ORIGINAL:
+            return attention.original(q, k, v, mask, self.heads, self.dim_head)
+
+        elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM:
+            return attention.split_einsum(q, k, v, mask, self.heads, self.dim_head)
+
+        elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM_V2:
+            return attention.split_einsum_v2(q, k, v, mask, self.heads, self.dim_head)
+
+        else:
+            raise ValueError(ATTENTION_IMPLEMENTATION_IN_EFFECT)
+
+        return attn
+
+
 class CrossAttention(nn.Module):
     """ Apple Silicon friendly version of `diffusers.models.attention.CrossAttention`
     """
@@ -66,10 +88,11 @@ class CrossAttention(nn.Module):
                               bias=False)
         self.to_out = nn.Sequential(
             nn.Conv2d(inner_dim, query_dim, kernel_size=1, bias=True))
+        self.einsum = Einsum(self.heads, self.dim_head)
 
     def forward(self, hidden_states, context=None, mask=None):
-        if self.training:
-            raise NotImplementedError(WARN_MSG)
+        # if self.training:
+        #     raise NotImplementedError(WARN_MSG)
 
         batch_size, dim, _, sequence_length = hidden_states.shape
 
@@ -96,17 +119,7 @@ class CrossAttention(nn.Module):
                     f"Invalid shape for `mask` (Expected {expected_mask_shape}, got {list(mask.size())}"
                 )
 
-        if ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.ORIGINAL:
-            attn = attention.original(q, k, v, mask, self.heads, self.dim_head)
-
-        elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM:
-            attn = attention.split_einsum(q, k, v, mask, self.heads, self.dim_head)
-
-        elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM_V2:
-            attn = attention.split_einsum_v2(q, k, v, mask, self.heads, self.dim_head)
-
-        else:
-            raise ValueError(ATTENTION_IMPLEMENTATION_IN_EFFECT)
+        attn = self.einsum(q, k, v, mask)
 
         return self.to_out(attn)
 
@@ -836,6 +849,8 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         super().__init__()
         self._register_load_state_dict_pre_hook(linear_to_conv2d_map)
 
+        self.config.time_cond_proj_dim = None
+
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
 
@@ -996,20 +1011,20 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
             down_block_res_samples += res_samples
 
-        if additional_residuals:
-            new_down_block_res_samples = ()
-            for i, down_block_res_sample in enumerate(down_block_res_samples):
-                down_block_res_sample = down_block_res_sample + additional_residuals[i]
-                new_down_block_res_samples += (down_block_res_sample,)
-            down_block_res_samples = new_down_block_res_samples
+        # if additional_residuals:
+        #     new_down_block_res_samples = ()
+        #     for i, down_block_res_sample in enumerate(down_block_res_samples):
+        #         down_block_res_sample = down_block_res_sample + additional_residuals[i]
+        #         new_down_block_res_samples += (down_block_res_sample,)
+        #     down_block_res_samples = new_down_block_res_samples
 
         # 4. mid
         sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
 
-        if additional_residuals:
-            sample = sample + additional_residuals[-1]
+        # if additional_residuals:
+        #     sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:
@@ -1100,20 +1115,20 @@ class UNet2DConditionModelXL(UNet2DConditionModel):
 
             down_block_res_samples += res_samples
 
-        if additional_residuals:
-            new_down_block_res_samples = ()
-            for i, down_block_res_sample in enumerate(down_block_res_samples):
-                down_block_res_sample = down_block_res_sample + additional_residuals[i]
-                new_down_block_res_samples += (down_block_res_sample,)
-            down_block_res_samples = new_down_block_res_samples
+        # if additional_residuals:
+        #     new_down_block_res_samples = ()
+        #     for i, down_block_res_sample in enumerate(down_block_res_samples):
+        #         down_block_res_sample = down_block_res_sample + additional_residuals[i]
+        #         new_down_block_res_samples += (down_block_res_sample,)
+        #     down_block_res_samples = new_down_block_res_samples
 
         # 4. mid
         sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
         
-        if additional_residuals:
-            sample = sample + additional_residuals[-1]
+        # if additional_residuals:
+        #     sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:
