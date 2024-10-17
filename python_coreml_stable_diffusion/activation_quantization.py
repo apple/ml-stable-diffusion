@@ -14,7 +14,6 @@ import gc
 import argparse
 import numpy as np
 from copy import deepcopy
-from pathlib import Path
 import coremltools as ct
 from coremltools.optimize.torch.quantization import (
     LinearQuantizer,
@@ -182,13 +181,13 @@ def register_input_log_hook(unet, inputs):
 
     return unet.register_forward_pre_hook(hook)
 
-def generate_calibration_data(pipe, args):
+def generate_calibration_data(pipe, args, calibration_dir):
     # Register forward pre hook to record unet inputs
     unet_inputs = []
     handle = register_input_log_hook(pipe.unet, unet_inputs)
-    
-    calibration_dir = f"calibration_data_{args.model_version.replace('/', '-')}"
-    Path(calibration_dir).mkdir(exist_ok=True)
+
+    # If directory doesn't exist, create it
+    os.makedirs(calibration_dir, exist_ok=True)
 
     for prompt in CALIBRATION_DATA:
         gen = torch.manual_seed(args.seed)
@@ -196,7 +195,7 @@ def generate_calibration_data(pipe, args):
         pipe(prompt=prompt, generator=gen)
         # save unet inputs
         filename = "_".join(prompt.split(" ")) + "_" + str(args.seed) + ".pkl"
-        filepath = os.path.join(args.o, calibration_dir, filename)
+        filepath = os.path.join(calibration_dir, filename)
         with open(filepath, 'wb') as f:
             pickle.dump(unet_inputs, f)
         # clear
@@ -267,10 +266,16 @@ def main(args):
         device = "cpu"
     logger.debug(f"Placing pipe in {device}")
     ref_pipe.to(device)
-    ref_out = run_pipe(ref_pipe)
+    # ref_out = run_pipe(ref_pipe)
 
+    # Setup artifact file paths
+    os.makedirs(args.o, exist_ok=True)
+    recipe_json_path = os.path.join(args.o, f"{args.model_version.replace('/', '_')}_quantization_recipe.json")
+    calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '_')}")
+
+    # Generate calibration data 
     if args.generate_calibration_data:
-        generate_calibration_data(ref_pipe, args)
+        generate_calibration_data(ref_pipe, args, calibration_dir)
 
     # Compute layer wise PSNR
     if args.layerwise_sensitivity:
@@ -289,8 +294,6 @@ def main(args):
             'einsum': {},
             'model_version': args.model_version
         }
-        json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
-        calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         for module_type, module_name in quantizable_modules:
@@ -310,17 +313,15 @@ def main(args):
             del q_pipe
             gc.collect()
 
-        with open(os.path.join(args.o, json_name), 'w') as f:
+        with open(recipe_json_path, 'w') as f:
             json.dump(results, f, indent=2)
 
 
     if args.quantize_pytorch:
         logger.info(f"Quantizing Unet PyTorch model")
-        calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
-        json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
-        with open(os.path.join(args.o, json_name), "r") as f:
+        with open(recipe_json_path, "r") as f:
             results = json.load(f)
 
         sorted_conv_layers = [layer for layer, _ in sorted(results['conv'].items(), key=lambda item: -item[1])]
@@ -354,7 +355,7 @@ def main(args):
             for k, v in sample_unet_input.items()
         }
         coreml_model = convert_to_coreml(traced_model, coreml_sample_unet_input)
-        coreml_filename = f"Stable_Diffusion_version_{args.model_version.replace('/', '-')}_unet.mlpackage"
+        coreml_filename = f"Stable_Diffusion_version_{args.model_version.replace('/', '_')}_unet.mlpackage"
         coreml_model.save(os.path.join(args.o, coreml_filename))
 
         del q_pipe
