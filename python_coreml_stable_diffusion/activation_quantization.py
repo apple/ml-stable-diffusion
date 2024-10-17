@@ -340,9 +340,9 @@ def main(args):
         handle.remove()
         quantized_unet.to('cpu')
         sample_input = {
-            "sample": dataloader[0][0].to('cpu'),
-            "timestep": dataloader[0][1].to('cpu'),
-            "encoder_hidden_states": dataloader[0][2].to('cpu'),
+            "sample": dataloader[0][0].to('cpu').to(torch.float16),
+            "timestep": dataloader[0][1].to('cpu').to(torch.float16),
+            "encoder_hidden_states": dataloader[0][2].to('cpu').to(torch.float16),
         }
 
         logger.info("JIT tracing quantized model")
