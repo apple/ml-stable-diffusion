@@ -80,7 +80,7 @@ def convert_to_coreml(torchscript_module, sample_inputs):
     return coreml_model
 
 
-def unet_data_loader(data_dir, device='cpu'):
+def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
     dataloader = []
     for file in os.listdir(data_dir):
         if file.endswith('.pkl'):
@@ -91,6 +91,10 @@ def unet_data_loader(data_dir, device='cpu'):
                         unet_data = pickle.load(data)
                         for input in unet_data:
                             dataloader.append([x.to(torch.float).to(device) for x in input])
+
+                        if calibration_nsamples:
+                            if len(dataloader) >= calibration_nsamples:
+                                break
                 except EOFError:
                     pass
 
@@ -283,7 +287,7 @@ def main(args):
         }
         json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
         calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
-        dataloader = unet_data_loader(calibration_dir, device)
+        dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         for module_type, module_name in quantizable_modules:
             logger.info(f"Quantizing Unet Layer: {module_name}")
@@ -309,7 +313,7 @@ def main(args):
     if args.quantize_pytorch:
         logger.info(f"Quantizing Unet PyTorch model")
         calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '-')}")
-        dataloader = unet_data_loader(calibration_dir, device)
+        dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         json_name = f"{args.model_version.replace('/', '-')}_quantization_recipe.json"
         with open(os.path.join(args.o, json_name), "r") as f:
@@ -332,7 +336,9 @@ def main(args):
 
         handle.remove()
         traced_model = torch.jit.trace(quantized_unet, dataloader[0])
-        coreml_model = convert_to_coreml(traced_model, dataloader[0])
+
+        sample_input = dict(zip(("sample", "timestep", "encoder_hidden_states"), dataloader[0]))
+        coreml_model = convert_to_coreml(traced_model, sample_input)
         coreml_model.save('quantized.mlpackage')
 
         del q_pipe
@@ -363,12 +369,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--layerwise-sensitivity",
         action="store_true",
-        help="Compute compression sensitivity by quantizing one layer at a time for Unet model"
+        help="Compute compression sensitivity by quantizing one layer at a time for UNet model"
     )
     parser.add_argument(
         "--quantize-pytorch",
         action="store_true",
-        help="Compute compression sensitivity by quantizing one layer at a time for Unet model"
+        help="Compute compression sensitivity by quantizing one layer at a time for UNet model"
+    )
+    parser.add_argument(
+        "--calibration-nsamples",
+        type=int,
+        help="Number of samples to use for calibrating UNet model"
     )
     parser.add_argument("--seed",
                         "-s",
