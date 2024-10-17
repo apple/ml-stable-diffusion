@@ -338,9 +338,12 @@ def main(args):
         logger.info(f"AVG PSNR: {avg_psnr}")
 
         handle.remove()
+        quantized_unet.to('cpu')
+        logger.info("JIT Tracing quantized model")
         traced_model = torch.jit.trace(quantized_unet, dataloader[0])
 
         sample_input = dict(zip(("sample", "timestep", "encoder_hidden_states"), dataloader[0]))
+        logger.info("Converting to COREML")
         coreml_model = convert_to_coreml(traced_model, sample_input)
         coreml_model.save('quantized.mlpackage')
 
