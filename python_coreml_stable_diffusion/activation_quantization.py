@@ -266,7 +266,7 @@ def main(args):
         device = "cpu"
     logger.debug(f"Placing pipe in {device}")
     ref_pipe.to(device)
-    # ref_out = run_pipe(ref_pipe)
+    ref_out = run_pipe(ref_pipe)
 
     # Setup artifact file paths
     os.makedirs(args.o, exist_ok=True)
