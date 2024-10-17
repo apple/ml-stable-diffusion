@@ -339,13 +339,19 @@ def main(args):
 
         handle.remove()
         quantized_unet.to('cpu')
-        logger.info("JIT Tracing quantized model")
-        traced_model = torch.jit.trace(quantized_unet, dataloader[0])
+        sample_input = {
+            "sample": dataloader[0][0].to('cpu'),
+            "timestep": dataloader[0][1].to('cpu'),
+            "encoder_hidden_states": dataloader[0][2].to('cpu'),
+        }
 
-        sample_input = dict(zip(("sample", "timestep", "encoder_hidden_states"), dataloader[0]))
-        logger.info("Converting to COREML")
+        logger.info("JIT tracing quantized model")
+        traced_model = torch.jit.trace(quantized_unet, example_inputs=list(sample_input.values()))
+
+        logger.info("Converting to CoreML")
         coreml_model = convert_to_coreml(traced_model, sample_input)
-        coreml_model.save('quantized.mlpackage')
+        coreml_filename = f"Stable_Diffusion_version_{args.model_version.replace('/', '-')}_unet.mlpackage"
+        coreml_model.save(os.path.join(args.o, coreml_filename))
 
         del q_pipe
 
