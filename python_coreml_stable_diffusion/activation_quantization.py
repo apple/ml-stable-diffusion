@@ -82,21 +82,25 @@ def convert_to_coreml(torchscript_module, sample_inputs):
 
 def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
     dataloader = []
+    skip_load = False
     for file in os.listdir(data_dir):
         if file.endswith('.pkl'):
             filepath = os.path.join(data_dir, file)
             with open(filepath, 'rb') as data:
                 try:
-                    while True:
+                    while not skip_load:
                         unet_data = pickle.load(data)
                         for input in unet_data:
                             dataloader.append([x.to(torch.float).to(device) for x in input])
 
-                        if calibration_nsamples:
-                            if len(dataloader) >= calibration_nsamples:
-                                break
+                            if calibration_nsamples:
+                                if len(dataloader) >= calibration_nsamples:
+                                    skip_load = True
+                                    break
                 except EOFError:
                     pass
+        if skip_load: 
+            break
 
     logger.info(f"Total calibration samples: {len(dataloader)}")
     return dataloader
@@ -332,7 +336,6 @@ def main(args):
         logger.info(f"PSNR: {psnr}")
         avg_psnr = sum(psnr) / len(psnr)
         logger.info(f"AVG PSNR: {avg_psnr}")
-        results[type][module_name] = avg_psnr
 
         handle.remove()
         traced_model = torch.jit.trace(quantized_unet, dataloader[0])
