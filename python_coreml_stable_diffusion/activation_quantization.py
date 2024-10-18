@@ -69,7 +69,7 @@ def convert_to_coreml(torchscript_module, sample_inputs):
     coreml_model = ct.convert(
         torchscript_module,
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS15,
+        minimum_deployment_target=ct.target.macOS14,
         inputs=get_coreml_inputs(sample_inputs),
         outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
         compute_units=ct.ComputeUnit.ALL,
