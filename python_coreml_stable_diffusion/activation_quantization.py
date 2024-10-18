@@ -151,7 +151,7 @@ def quantize(model, config, calibration_data):
     ]
 
     config.non_traceable_module_names = non_traceable_module_names
-    config.preserved_attributes = ['config']
+    config.preserved_attributes = ['config', 'device']
 
     input = calibration_data[0]
     quantizer = LinearQuantizer(model, config)
