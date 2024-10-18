@@ -835,6 +835,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         addition_embed_type=None,
         addition_time_embed_dim=None,
         projection_class_embeddings_input_dim=None,
+        support_controlnet=False,
         **kwargs,
     ):
         if kwargs.get("dual_cross_attention", None):
@@ -850,7 +851,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
         self._register_load_state_dict_pre_hook(linear_to_conv2d_map)
 
         self.config.time_cond_proj_dim = None
-
+        self.support_controlnet = support_controlnet
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
 
@@ -1011,20 +1012,20 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin):
 
             down_block_res_samples += res_samples
 
-        # if additional_residuals:
-        #     new_down_block_res_samples = ()
-        #     for i, down_block_res_sample in enumerate(down_block_res_samples):
-        #         down_block_res_sample = down_block_res_sample + additional_residuals[i]
-        #         new_down_block_res_samples += (down_block_res_sample,)
-        #     down_block_res_samples = new_down_block_res_samples
+        if self.support_controlnet:
+            new_down_block_res_samples = ()
+            for i, down_block_res_sample in enumerate(down_block_res_samples):
+                down_block_res_sample = down_block_res_sample + additional_residuals[i]
+                new_down_block_res_samples += (down_block_res_sample,)
+            down_block_res_samples = new_down_block_res_samples
 
         # 4. mid
         sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
 
-        # if additional_residuals:
-        #     sample = sample + additional_residuals[-1]
+        if self.support_controlnet:
+            sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:
@@ -1115,20 +1116,20 @@ class UNet2DConditionModelXL(UNet2DConditionModel):
 
             down_block_res_samples += res_samples
 
-        # if additional_residuals:
-        #     new_down_block_res_samples = ()
-        #     for i, down_block_res_sample in enumerate(down_block_res_samples):
-        #         down_block_res_sample = down_block_res_sample + additional_residuals[i]
-        #         new_down_block_res_samples += (down_block_res_sample,)
-        #     down_block_res_samples = new_down_block_res_samples
+        if self.support_controlnet:
+            new_down_block_res_samples = ()
+            for i, down_block_res_sample in enumerate(down_block_res_samples):
+                down_block_res_sample = down_block_res_sample + additional_residuals[i]
+                new_down_block_res_samples += (down_block_res_sample,)
+            down_block_res_samples = new_down_block_res_samples
 
         # 4. mid
         sample = self.mid_block(sample,
                                 emb,
                                 encoder_hidden_states=encoder_hidden_states)
         
-        # if additional_residuals:
-        #     sample = sample + additional_residuals[-1]
+        if self.support_controlnet:
+            sample = sample + additional_residuals[-1]
 
         # 5. up
         for upsample_block in self.up_blocks:

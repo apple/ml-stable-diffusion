@@ -873,7 +873,7 @@ def convert_unet(pipe, args, model_name=None):
         else:
             unet_cls = unet.UNet2DConditionModel
 
-        reference_unet = unet_cls(**pipe.unet.config).eval()
+        reference_unet = unet_cls(support_controlnet=args.unet_support_controlnet, **pipe.unet.config).eval()
 
         load_state_dict_summary = reference_unet.load_state_dict(
             pipe.unet.state_dict())
