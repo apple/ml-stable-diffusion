@@ -228,8 +228,6 @@ def run_pipe(pipe):
     gen = torch.manual_seed(args.seed)
     kwargs = dict(
         prompt=RANDOM_TEST_DATA,
-        negative_prompt=[""] * len(RANDOM_TEST_DATA),
-        num_inference_steps=1,
         output_type="latent",
         generator=gen,
     )
