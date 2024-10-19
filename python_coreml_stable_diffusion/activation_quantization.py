@@ -120,8 +120,13 @@ def quantize_module_config(module_name):
     return config
 
 def quantize_cumulative_config(skip_conv_layers, skip_einsum_layers):
-    conv_modules_config = {name: None for name in skip_conv_layers}
-    einsum_modules_config = {name: None for name in skip_einsum_layers}
+    logger.info(f"Skipping {len(skip_conv_layers)} conv layers and {skip_einsum_layers} einsum layers")
+    w8config = ModuleLinearQuantizerConfig(
+            quantization_scheme="symmetric",
+            milestones=[0, 1000, 1000, 0],
+            activation_dtype=torch.float32)
+    conv_modules_config = {name: w8config for name in skip_conv_layers}
+    einsum_modules_config = {name: w8config for name in skip_einsum_layers}
     module_name_config = {}
     module_name_config.update(conv_modules_config)
     module_name_config.update(einsum_modules_config)
@@ -325,7 +330,20 @@ def main(args):
         sorted_conv_layers = [layer for layer, _ in sorted(results['conv'].items(), key=lambda item: -item[1])]
         sorted_einsum_layers = [layer for layer, _ in sorted(results['einsum'].items(), key=lambda item: -item[1])]
 
-        config = quantize_cumulative_config(sorted_conv_layers[150:], sorted_einsum_layers[21:])
+        skipped_conv =  set(sorted_conv_layers[150:])
+        skipped_einsum = set(sorted_einsum_layers[21:])
+
+        for layer in sorted_conv_layers:
+            if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
+                if layer in skipped_conv:
+                    logger.info("removing", layer)
+                    skipped_conv.remove(layer)
+            if "upsamplers" in layer:
+                if layer in skipped_conv:
+                    logger.info("removing", layer)
+                    skipped_conv.remove(layer)
+
+        config = quantize_cumulative_config(skipped_conv, skipped_einsum)
 
         quantized_unet = quantize(ref_pipe.unet, config, dataloader)
         q_pipe, handle = prepare_pipe(ref_pipe, quantized_unet)
