@@ -82,7 +82,7 @@ def convert_to_coreml(torchscript_module, sample_inputs):
 def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
     dataloader = []
     skip_load = False
-    for file in os.listdir(data_dir):
+    for file in sorted(os.listdir(data_dir)):
         if file.endswith('.pkl'):
             filepath = os.path.join(data_dir, file)
             with open(filepath, 'rb') as data:
