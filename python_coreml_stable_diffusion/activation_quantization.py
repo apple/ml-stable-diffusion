@@ -120,7 +120,7 @@ def quantize_module_config(module_name):
     return config
 
 def quantize_cumulative_config(skip_conv_layers, skip_einsum_layers):
-    logger.info(f"Skipping {len(skip_conv_layers)} conv layers and {skip_einsum_layers} einsum layers")
+    logger.info(f"Skipping {len(skip_conv_layers)} conv layers and {len(skip_einsum_layers)} einsum layers")
     w8config = ModuleLinearQuantizerConfig(
             quantization_scheme="symmetric",
             milestones=[0, 1000, 1000, 0],
