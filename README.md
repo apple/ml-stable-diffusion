@@ -514,6 +514,7 @@ Please refer to the help menu for all available arguments: `python -m python_cor
 - `--scheduler`: If you would like to experiment with different schedulers, you may specify it here. For available options, please see the help menu. You may also specify a custom number of inference steps by `--num-inference-steps` which defaults to 50.
 - `--controlnet`: ControlNet models specified with this option are used in image generation. Use this option in the format `--controlnet lllyasviel/sd-controlnet-mlsd lllyasviel/sd-controlnet-depth` and make sure to use `--controlnet-inputs` in conjunction.
 - `--controlnet-inputs`: Image inputs corresponding to each ControlNet model. Please provide image paths in same order as models in `--controlnet`, for example: `--controlnet-inputs image_mlsd image_depth`.
+- `--unet-batch-one`: Do not batch unet predictions for the prompt and negative prompt. This requires the unet has been converted with a batch size of one, see `--unet-batch-one` option in conversion script.
 
 </details>
 

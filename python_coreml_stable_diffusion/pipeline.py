@@ -416,9 +416,10 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             callback=None,
             callback_steps=1,
             controlnet_cond=None,
-            original_size: Optional[Tuple[int, int]] = None,
-            crops_coords_top_left: Tuple[int, int] = (0, 0),
-            target_size: Optional[Tuple[int, int]] = None,
+            original_size: Optional[Tuple[int, int]]=None,
+            crops_coords_top_left: Tuple[int, int]=(0, 0),
+            target_size: Optional[Tuple[int, int]]=None,
+            unet_batch_one=False,
             **kwargs,
     ):
         # 1. Check inputs. Raise error if not correct
@@ -525,16 +526,38 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
             # predict the noise residual
             unet_additional_kwargs.update(control_net_additional_residuals)
 
-            noise_pred = self.unet(
-                sample=latent_model_input.astype(np.float16),
-                timestep=timestep,
-                encoder_hidden_states=text_embeddings.astype(np.float16),
-                **unet_additional_kwargs,
-            )["noise_pred"]
+            # get prediction from unet
+            if not (unet_batch_one and do_classifier_free_guidance):
+                noise_pred = self.unet(
+                    sample=latent_model_input.astype(np.float16),
+                    timestep=timestep,
+                    encoder_hidden_states=text_embeddings.astype(np.float16),
+                    **unet_additional_kwargs,
+                )["noise_pred"]
+
+                if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = np.split(noise_pred, 2)
+            else:
+                # query unet sequentially
+                latent_model_input = latent_model_input.astype(np.float16)
+                text_embeddings = text_embeddings.astype(np.float16)
+                timestep = np.array([t,], np.float16)
+
+                noise_pred_uncond = self.unet(
+                    sample=np.expand_dims(latent_model_input[0], axis=0),
+                    timestep=timestep,
+                    encoder_hidden_states=np.expand_dims(text_embeddings[0], axis=0),
+                    **unet_additional_kwargs,
+                )["noise_pred"]
+                noise_pred_text = self.unet(
+                    sample=np.expand_dims(latent_model_input[1], axis=0),
+                    timestep=timestep,
+                    encoder_hidden_states=np.expand_dims(text_embeddings[1], axis=0),
+                    **unet_additional_kwargs,
+                )["noise_pred"]
 
             # perform guidance
             if do_classifier_free_guidance:
-                noise_pred_uncond, noise_pred_text = np.split(noise_pred, 2)
                 noise_pred = noise_pred_uncond + guidance_scale * (
                         noise_pred_text - noise_pred_uncond)
 
@@ -751,6 +774,7 @@ def main(args):
         guidance_scale=args.guidance_scale,
         controlnet_cond=controlnet_cond,
         negative_prompt=args.negative_prompt,
+        unet_batch_one=args.unet_batch_one,
     )
 
     out_path = get_image_path(args)
@@ -821,6 +845,10 @@ if __name__ == "__main__":
         "--negative-prompt",
         default=None,
         help="The negative text prompt to be used for text-to-image generation.")
+    parser.add_argument(
+        "--unet-batch-one",
+        action="store_true",
+        help="Do not batch unet predictions for the prompt and negative prompt.")
     parser.add_argument('--model-sources',
                         default=None,
                         choices=['packages', 'compiled'],
