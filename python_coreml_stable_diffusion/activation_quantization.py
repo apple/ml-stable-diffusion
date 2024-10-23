@@ -107,6 +107,7 @@ def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
 def quantize_module_config(module_name):
     config = LinearQuantizerConfig(
         global_config=ModuleLinearQuantizerConfig(
+            milestones=[0, 1000, 1000, 0],
             weight_dtype=torch.float32,
             activation_dtype=torch.float32,
         ),
@@ -162,14 +163,14 @@ def quantize(model, config, calibration_data):
     quantizer = LinearQuantizer(model, config)
     logger.info("Preparing model for quantization")
     prepared_model = quantizer.prepare(example_inputs=(input,))
+    prepared_model.eval()
 
     quantizer.step()
 
     logger.info("Calibrate")
     for idx, data in enumerate(calibration_data):
         logger.info(f"Calibration data sample: {idx}")
-        with torch.no_grad():
-            prepared_model(*data)
+        prepared_model(*data)
 
     logger.info("Finalize model")
     quantized_model = quantizer.finalize()
