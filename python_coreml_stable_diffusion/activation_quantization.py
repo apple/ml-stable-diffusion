@@ -15,7 +15,7 @@ import argparse
 import numpy as np
 from copy import deepcopy
 import coremltools as ct
-from coremltools.optimize.torch.quantization import (
+from phoenix.quantization import (
     LinearQuantizer,
     LinearQuantizerConfig,
     ModuleLinearQuantizerConfig
