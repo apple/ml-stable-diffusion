@@ -328,13 +328,16 @@ def main(args):
         with open(recipe_json_path, "r") as f:
             results = json.load(f)
 
-        sorted_conv_layers = [layer for layer, _ in sorted(results['conv'].items(), key=lambda item: -item[1])]
-        sorted_einsum_layers = [layer for layer, _ in sorted(results['einsum'].items(), key=lambda item: -item[1])]
+        # sorted_conv_layers = [layer for layer, _ in sorted(results['conv'].items(), key=lambda item: -item[1])]
+        # sorted_einsum_layers = [layer for layer, _ in sorted(results['einsum'].items(), key=lambda item: -item[1])]
+        #
+        # skipped_conv =  set(sorted_conv_layers[args.num_conv:])
+        # skipped_einsum = set(sorted_einsum_layers[args.num_einsum:])
 
-        skipped_conv =  set(sorted_conv_layers[args.num_conv:])
-        skipped_einsum = set(sorted_einsum_layers[args.num_einsum:])
+        skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
+        skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
 
-        for layer in sorted_conv_layers:
+        for layer in results['conv'].keys():
             if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
                 if layer in skipped_conv:
                     logger.info(f"removing {layer}")
@@ -343,11 +346,10 @@ def main(args):
                 if layer in skipped_conv:
                     logger.info(f"removing {layer}")
                     skipped_conv.remove(layer)
-            if args.to_out:
-                if "to_out" in layer:
-                    if layer not in skipped_conv:
-                        logger.info(f"adding {layer}")
-                        skipped_conv.add(layer)
+            if "to_out" in layer:
+                if layer not in skipped_conv:
+                    logger.info(f"adding {layer}")
+                    skipped_conv.add(layer)
 
         config = quantize_cumulative_config(skipped_conv, skipped_einsum)
 
@@ -425,18 +427,13 @@ if __name__ == "__main__":
                         default=11,
                         type=int,
                         help="Random seed to be able to reproduce results")
-    parser.add_argument("--num-conv",
-                        default=150,
-                        type=int,
-                        help="Number of conv layers to quantize")
-    parser.add_argument("--num-einsum",
-                        default=21,
-                        type=int,
-                        help="Number of einsum layers to quantize")
-    parser.add_argument(
-        "--to-out",
-        action="store_true",
-        help="Skip to_out layers"
-    )
+    parser.add_argument("--conv-psnr",
+                        default=40.0,
+                        type=float,
+                        help="PSNR threshold for conv layers")
+    parser.add_argument("--attn-psnr",
+                        default=28.0,
+                        type=float,
+                        help="PSNR threshold for einsum layers")
     args = parser.parse_args()
     main(args)
