@@ -274,7 +274,7 @@ def main(args):
 
     # Setup artifact file paths
     os.makedirs(args.o, exist_ok=True)
-    recipe_json_path = os.path.join(args.o, f"{args.model_version.replace('/', '_')}_quantization_recipe2.json")
+    recipe_json_path = os.path.join(args.o, f"{args.model_version.replace('/', '_')}_quantization_recipe.json")
     calibration_dir = os.path.join(args.o, f"calibration_data_{args.model_version.replace('/', '_')}")
 
     # Generate calibration data 
@@ -327,12 +327,6 @@ def main(args):
 
         with open(recipe_json_path, "r") as f:
             results = json.load(f)
-
-        # sorted_conv_layers = [layer for layer, _ in sorted(results['conv'].items(), key=lambda item: -item[1])]
-        # sorted_einsum_layers = [layer for layer, _ in sorted(results['einsum'].items(), key=lambda item: -item[1])]
-        #
-        # skipped_conv =  set(sorted_conv_layers[args.num_conv:])
-        # skipped_einsum = set(sorted_einsum_layers[args.num_einsum:])
 
         skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
         skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
