@@ -261,7 +261,6 @@ def get_reference_pipeline(model_version):
     del pipe
     return ref_pipe
 
-from sorted_layers import sorted_conv_layers, sorted_einsum_layers
 def main(args):
     # Initialize reference pipeline
     ref_pipe = get_reference_pipeline(args.model_version)
@@ -326,15 +325,13 @@ def main(args):
         logger.info(f"Quantizing Unet PyTorch model")
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
-        # with open(recipe_json_path, "r") as f:
-        #     results = json.load(f)
+        with open(recipe_json_path, "r") as f:
+            results = json.load(f)
 
-        # skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
-        # skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
-        skipped_conv = set(sorted_conv_layers[150:])
-        skipped_einsum = set(sorted_einsum_layers[21:])
+        skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
+        skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
 
-        for layer in sorted_conv_layers:
+        for layer in results['conv'].keys():
             if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
                 if layer in skipped_conv:
                     logger.info(f"removing {layer}")
