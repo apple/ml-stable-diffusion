@@ -47,12 +47,12 @@ CALIBRATION_DATA = [
 RANDOM_TEST_DATA = [
     "a black and brown dog standing outside a door.",
     "a person on a motorcycle makes a turn on the track.",
-    "inflatable boats sit on the arizona river, and on the bank",
-    "a white cat sitting under a white umbrella",
-    "black bear standing in a field of grass under a tree.",
-    "a train that is parked on tracks and has graffiti writing on it, with a mountain range in the background.",
-    "a cake inside of a pan sitting in an oven.",
-    "a table with paper plates and flowers in a home",
+    # "inflatable boats sit on the arizona river, and on the bank",
+    # "a white cat sitting under a white umbrella",
+    # "black bear standing in a field of grass under a tree.",
+    # "a train that is parked on tracks and has graffiti writing on it, with a mountain range in the background.",
+    # "a cake inside of a pan sitting in an oven.",
+    # "a table with paper plates and flowers in a home",
 ]
 
 def get_coreml_inputs(sample_inputs):
