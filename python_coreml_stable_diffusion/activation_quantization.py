@@ -234,10 +234,10 @@ def run_pipe(pipe):
     gen = torch.manual_seed(args.seed)
     kwargs = dict(
         prompt=RANDOM_TEST_DATA,
-        output_type="np",
+        output_type="latent",
         generator=gen,
     )
-    return np.array([image for image in pipe(**kwargs).images])
+    return np.array([latent.cpu().numpy() for latent in pipe(**kwargs).images])
 
 
 def get_reference_pipeline(model_version):
