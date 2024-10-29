@@ -80,6 +80,10 @@ def convert_to_coreml(torchscript_module, sample_inputs):
 
 
 def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
+    """
+    Load calibration data from specified path.
+    Limit number of samples to calibration_nsamples, if specified.
+    """
     dataloader = []
     skip_load = False
     for file in sorted(os.listdir(data_dir)):
@@ -126,9 +130,8 @@ def quantize_module_config(module_name):
 
 def quantize_cumulative_config(skip_conv_layers, skip_einsum_layers):
     """
-        Generate quantization config to apply W8A8 quantization
-        to entire model except for the specified layers
-        Rest of the model is kept in FP32 precision.
+    Generate quantization config to apply W8A8 quantization.
+    Skipped layers are kept in W8A32 precision.
     """
     logger.info(f"Skipping {len(skip_conv_layers)} conv layers and {len(skip_einsum_layers)} einsum layers")
     w8config = ModuleLinearQuantizerConfig(
@@ -158,6 +161,9 @@ def quantize_cumulative_config(skip_conv_layers, skip_einsum_layers):
     return config
 
 def quantize(model, config, calibration_data):
+    """
+    Apply post training activation quantization to specified model, using calibration data
+    """
     submodules = dict(model.named_modules(remove_duplicate=True))
     layer_norm_modules = [key for key, val in submodules.items() if isinstance(val, LayerNormANE)]
     non_traceable_module_names = layer_norm_modules + [
@@ -165,13 +171,14 @@ def quantize(model, config, calibration_data):
         "time_embedding",
     ]
 
+    # Mark certain modules as non-traceable to make the UNet model fx traceable
     config.non_traceable_module_names = non_traceable_module_names
     config.preserved_attributes = ['config', 'device']
 
-    input = calibration_data[0]
+    sample_input = calibration_data[0]
     quantizer = LinearQuantizer(model, config)
     logger.info("Preparing model for quantization")
-    prepared_model = quantizer.prepare(example_inputs=(input,))
+    prepared_model = quantizer.prepare(example_inputs=(sample_input,))
     prepared_model.eval()
 
     quantizer.step()
@@ -185,7 +192,22 @@ def quantize(model, config, calibration_data):
     quantized_model = quantizer.finalize()
     return quantized_model
 
+def get_quantizable_modules(unet):
+    quantizable_modules = []
+    for name, module in unet.named_modules():
+        if len(list(module.children())) > 0:
+            continue
+        if type(module) == torch.nn.modules.conv.Conv2d:
+            quantizable_modules.append(('conv', name))
+        if type(module) == Einsum:
+            quantizable_modules.append(('einsum', name))
+
+    return quantizable_modules
+
 def register_input_log_hook(unet, inputs):
+    """
+    Register forward pre hook to save model inputs 
+    """
     def hook(_, input):
         input_copy = deepcopy(input)
         input_copy = tuple(i.to('cpu') for i in input_copy)
@@ -204,6 +226,8 @@ def generate_calibration_data(pipe, args, calibration_dir):
     # If directory doesn't exist, create it
     os.makedirs(calibration_dir, exist_ok=True)
 
+    # Run calibration prompts through the pipeline and
+    # serialize recorded UNet model inputs
     for prompt in CALIBRATION_DATA:
         gen = torch.manual_seed(args.seed)
         # run forward pass
@@ -219,6 +243,10 @@ def generate_calibration_data(pipe, args, calibration_dir):
     handle.remove()
 
 def register_input_preprocessing_hook(pipe):
+    """
+    Register forward pre hook to convert UNet inputs from HuggingFace StableDiffusionPipeline
+    to match expected model inputs in UNet2DConditionModel defined in unet.py
+    """
     def hook(_, args, kwargs):
         sample = args[0]
         timestep = args[1]
@@ -233,6 +261,9 @@ def register_input_preprocessing_hook(pipe):
     return pipe.unet.register_forward_pre_hook(hook, with_kwargs=True)
 
 def prepare_pipe(pipe, unet):
+    """
+    Create a new pipeline from `pipe` with `unet` as the noise predictor
+    """
     new_pipe = deepcopy(pipe)
     unet.to(new_pipe.unet.device)
     new_pipe.unet = unet
@@ -279,6 +310,7 @@ def main(args):
         device = "cpu"
     logger.debug(f"Placing pipe in {device}")
     ref_pipe.to(device)
+    # Generate baseline outputs
     ref_out = run_pipe(ref_pipe)
 
     # Setup artifact file paths
@@ -290,17 +322,10 @@ def main(args):
     if args.generate_calibration_data:
         generate_calibration_data(ref_pipe, args, calibration_dir)
 
-    # Compute layer wise PSNR
+    # Compute layer-wise PSNR
     if args.layerwise_sensitivity:
-        logger.info(f"Compute Layerwise PSNR")
-        quantizable_modules = []
-        for name, module in ref_pipe.unet.named_modules():
-            if len(list(module.children())) > 0:
-                continue
-            if type(module) == torch.nn.modules.conv.Conv2d:
-                quantizable_modules.append(('conv', name))
-            if type(module) == Einsum:
-               quantizable_modules.append(('einsum', name))
+        logger.info(f"Compute Layer-wise PSNR")
+        quantizable_modules = get_quantizable_modules(ref_pipe.unet)
 
         results = {
             'conv': {},
@@ -310,9 +335,11 @@ def main(args):
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         for module_type, module_name in quantizable_modules:
-            logger.info(f"Quantizing Unet Layer: {module_name}")
+            logger.info(f"Quantizing UNet Layer: {module_name}")
             config = quantize_module_config(module_name)
             quantized_unet = quantize(ref_pipe.unet, config, dataloader)
+
+            # Generate outputs from quantized model
             q_pipe, _ = prepare_pipe(ref_pipe, quantized_unet)
             test_out = run_pipe(q_pipe)
 
@@ -329,18 +356,19 @@ def main(args):
         with open(recipe_json_path, 'w') as f:
             json.dump(results, f, indent=2)
 
-
     if args.quantize_pytorch:
-        logger.info(f"Quantizing Unet PyTorch model")
+        logger.info(f"Quantizing UNet PyTorch model")
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         with open(recipe_json_path, "r") as f:
             results = json.load(f)
 
+        logger.info(f"Conv PSNR threshold: {args.conv_psnr}, Attn PSNR threshold: {args.attn_psnr}")
         skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
         skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
 
         for layer in results['conv'].keys():
+            # Quantize the slowest conv layers, even if in skipped set based on PSNR, for good inference speedup
             if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
                 if layer in skipped_conv:
                     logger.info(f"removing {layer}")
@@ -349,14 +377,19 @@ def main(args):
                 if layer in skipped_conv:
                     logger.info(f"removing {layer}")
                     skipped_conv.remove(layer)
+            # Do not quantize out projection layers to avoid quantizing outputs of preceding concat layers.
+            # Quantizing output of concat layers can lead to quality degradation, due to sharing of scales
+            # across concat inputs, which can have varied ranges. Since this is a constraint enforced during
+            # model conversion, it may not be captured in layer-wise PSNR analysis of PyTorch model.
             if "to_out" in layer:
                 if layer not in skipped_conv:
                     logger.info(f"adding {layer}")
                     skipped_conv.add(layer)
 
         config = quantize_cumulative_config(skipped_conv, skipped_einsum)
-
         quantized_unet = quantize(ref_pipe.unet, config, dataloader)
+
+        # Generate outputs from quantized model
         q_pipe, handle = prepare_pipe(ref_pipe, quantized_unet)
         test_out = run_pipe(q_pipe)
 
@@ -403,22 +436,22 @@ if __name__ == "__main__":
         required=True,
         help=
         ("The pre-trained model checkpoint and configuration to restore. "
-         "For available versions: https://huggingface.co/models?search=stable-diffusion"
+         "For available versions: https://huggingface.co/models?search=stable-diffusion."
     ))
     parser.add_argument(
         "--generate-calibration-data",
         action="store_true",
-        help="Quantize pytorch model before conversion"
+        help="Generate calibration data for UNet model"
     )
     parser.add_argument(
         "--layerwise-sensitivity",
         action="store_true",
-        help="Compute compression sensitivity by quantizing one layer at a time for UNet model"
+        help="Compute compression sensitivity per-layer, by quantizing one layer at a time"
     )
     parser.add_argument(
         "--quantize-pytorch",
         action="store_true",
-        help="Compute compression sensitivity by quantizing one layer at a time for UNet model"
+        help="Generate activation quantized UNet model by quantizing layers above specified PSNR threshold"
     )
     parser.add_argument(
         "--calibration-nsamples",
@@ -427,19 +460,22 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed",
                         "-s",
-                        default=11,
+                        default=50,
                         type=int,
                         help="Random seed to be able to reproduce results"
     )
     parser.add_argument("--conv-psnr",
-                        default=38.0,
+                        default=40.0,
                         type=float,
-                        help="PSNR threshold for conv layers"
+                        help="PSNR threshold for convolutional layers (default for stabilityai/stable-diffusion-2-1-base)"
     )
     parser.add_argument("--attn-psnr",
-                        default=26.0,
+                        default=30.0,
                         type=float,
-                        help="PSNR threshold for einsum layers"
+                        help="PSNR threshold for attention (Einsum) layers (default for stabilityai/stable-diffusion-2-1-base)"
     )
     args = parser.parse_args()
+    if 'xl' in args.model_version:
+        raise NotImplementedError("Not supported for Stable Diffusion XL models")
+
     main(args)
