@@ -1,5 +1,3 @@
-from python_coreml_stable_diffusion.torch2coreml import compute_psnr
-from python_coreml_stable_diffusion import unet
 import torch
 import operator
 import logging
@@ -15,12 +13,14 @@ import argparse
 import numpy as np
 from copy import deepcopy
 import coremltools as ct
-from phoenix.quantization import (
+from coremltools.optimize.torch.quantization import (
     LinearQuantizer,
     LinearQuantizerConfig,
     ModuleLinearQuantizerConfig
 )
 from diffusers import StableDiffusionPipeline
+from python_coreml_stable_diffusion import unet
+from python_coreml_stable_diffusion.torch2coreml import compute_psnr
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
 from python_coreml_stable_diffusion.unet import Einsum
 
@@ -47,12 +47,12 @@ CALIBRATION_DATA = [
 RANDOM_TEST_DATA = [
     "a black and brown dog standing outside a door.",
     "a person on a motorcycle makes a turn on the track.",
-    # "inflatable boats sit on the arizona river, and on the bank",
-    # "a white cat sitting under a white umbrella",
-    # "black bear standing in a field of grass under a tree.",
-    # "a train that is parked on tracks and has graffiti writing on it, with a mountain range in the background.",
-    # "a cake inside of a pan sitting in an oven.",
-    # "a table with paper plates and flowers in a home",
+    "inflatable boats sit on the arizona river, and on the bank",
+    "a white cat sitting under a white umbrella",
+    "black bear standing in a field of grass under a tree.",
+    "a train that is parked on tracks and has graffiti writing on it, with a mountain range in the background.",
+    "a cake inside of a pan sitting in an oven.",
+    "a table with paper plates and flowers in a home",
 ]
 
 def get_coreml_inputs(sample_inputs):
@@ -105,6 +105,10 @@ def unet_data_loader(data_dir, device='cpu', calibration_nsamples=None):
     return dataloader
 
 def quantize_module_config(module_name):
+    """
+    Generate quantization config to apply W8A8 quantization for specified module.
+    Rest of the model is kept in FP32 precision.
+    """
     config = LinearQuantizerConfig(
         global_config=ModuleLinearQuantizerConfig(
             milestones=[0, 1000, 1000, 0],
@@ -121,6 +125,11 @@ def quantize_module_config(module_name):
     return config
 
 def quantize_cumulative_config(skip_conv_layers, skip_einsum_layers):
+    """
+        Generate quantization config to apply W8A8 quantization
+        to entire model except for the specified layers
+        Rest of the model is kept in FP32 precision.
+    """
     logger.info(f"Skipping {len(skip_conv_layers)} conv layers and {len(skip_einsum_layers)} einsum layers")
     w8config = ModuleLinearQuantizerConfig(
             quantization_scheme="symmetric",
@@ -395,7 +404,7 @@ if __name__ == "__main__":
         help=
         ("The pre-trained model checkpoint and configuration to restore. "
          "For available versions: https://huggingface.co/models?search=stable-diffusion"
-     ))
+    ))
     parser.add_argument(
         "--generate-calibration-data",
         action="store_true",
@@ -420,14 +429,17 @@ if __name__ == "__main__":
                         "-s",
                         default=11,
                         type=int,
-                        help="Random seed to be able to reproduce results")
+                        help="Random seed to be able to reproduce results"
+    )
     parser.add_argument("--conv-psnr",
-                        default=40.0,
+                        default=38.0,
                         type=float,
-                        help="PSNR threshold for conv layers")
+                        help="PSNR threshold for conv layers"
+    )
     parser.add_argument("--attn-psnr",
-                        default=28.0,
+                        default=26.0,
                         type=float,
-                        help="PSNR threshold for einsum layers")
+                        help="PSNR threshold for einsum layers"
+    )
     args = parser.parse_args()
     main(args)
