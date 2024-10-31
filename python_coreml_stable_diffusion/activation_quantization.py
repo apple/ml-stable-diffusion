@@ -1,3 +1,8 @@
+#
+# For licensing see accompanying LICENSE.md file.
+# Copyright (C) 2022 Apple Inc. All Rights Reserved.
+#
+
 import torch
 import operator
 import logging
@@ -65,7 +70,7 @@ def get_coreml_inputs(sample_inputs):
     ]
 
 def convert_to_coreml(torchscript_module, sample_inputs):
-    logger.info(f"Converting model to CoreML..")
+    logger.info("Converting model to CoreML..")
     coreml_model = ct.convert(
         torchscript_module,
         convert_to="mlprogram",
@@ -299,6 +304,7 @@ def get_reference_pipeline(model_version):
     ref_pipe, _ = prepare_pipe(pipe, reference_unet)
 
     del pipe
+    gc.collect()
     return ref_pipe
 
 def main(args):
@@ -324,7 +330,7 @@ def main(args):
 
     # Compute layer-wise PSNR
     if args.layerwise_sensitivity:
-        logger.info(f"Compute Layer-wise PSNR")
+        logger.info("Compute Layer-wise PSNR")
         quantizable_modules = get_quantizable_modules(ref_pipe.unet)
 
         results = {
@@ -357,7 +363,7 @@ def main(args):
             json.dump(results, f, indent=2)
 
     if args.quantize_pytorch:
-        logger.info(f"Quantizing UNet PyTorch model")
+        logger.info("Quantizing UNet PyTorch model")
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
         with open(recipe_json_path, "r") as f:

@@ -59,11 +59,6 @@ class Einsum(nn.Module):
         elif ATTENTION_IMPLEMENTATION_IN_EFFECT == AttentionImplementations.SPLIT_EINSUM_V2:
             return attention.split_einsum_v2(q, k, v, mask, self.heads, self.dim_head)
 
-        else:
-            raise ValueError(ATTENTION_IMPLEMENTATION_IN_EFFECT)
-
-        return attn
-
 
 class CrossAttention(nn.Module):
     """ Apple Silicon friendly version of `diffusers.models.attention.CrossAttention`
