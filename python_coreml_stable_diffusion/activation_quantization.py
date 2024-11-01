@@ -3,30 +3,34 @@
 # Copyright (C) 2022 Apple Inc. All Rights Reserved.
 #
 
-import torch
-import operator
 import logging
+import operator
+
+import torch
+
 logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel('INFO')
 
-import os
-import json
-import pickle
-import gc
 import argparse
-import numpy as np
+import gc
+import json
+import os
+import pickle
 from copy import deepcopy
+
 import coremltools as ct
+import numpy as np
 from coremltools.optimize.torch.quantization import (
     LinearQuantizer,
     LinearQuantizerConfig,
     ModuleLinearQuantizerConfig
 )
 from diffusers import StableDiffusionPipeline
+
 from python_coreml_stable_diffusion import unet
-from python_coreml_stable_diffusion.torch2coreml import compute_psnr
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
+from python_coreml_stable_diffusion.torch2coreml import compute_psnr
 from python_coreml_stable_diffusion.unet import Einsum
 
 CALIBRATION_DATA = [
