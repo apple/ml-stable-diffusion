@@ -336,6 +336,7 @@ def patched_make_causal_mask(input_ids_shape, dtype, device, past_key_values_len
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
 modeling_clip._make_causal_mask = patched_make_causal_mask
+modeling_clip._create_4d_causal_attention_mask = patched_make_causal_mask
 
 def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     """ Converts the text encoder component of Stable Diffusion
