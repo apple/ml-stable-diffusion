@@ -283,12 +283,38 @@ public struct StableDiffusionPipeline: StableDiffusionPipelineProtocol {
             
             // Predict noise residuals from latent samples
             // and current time step conditioned on hidden states
-            var noise = try unet.predictNoise(
-                latents: latentUnetInput,
-                timeStep: t,
-                hiddenStates: hiddenStates,
-                additionalResiduals: additionalResiduals
-            )
+            var noise : [MLShapedArray<Float32>]
+            if unet.latentSampleShape[0] >= 2 || config.guidanceScale < 1.0 {
+                // One predict call from the uNet, using batching if needed
+                noise = try unet.predictNoise(
+                  latents: latentUnetInput,
+                  timeStep: t,
+                  hiddenStates: hiddenStates,
+                  additionalResiduals: additionalResiduals
+                )
+            } else {
+                // Serial predictions from uNet
+                var hidden0 = MLShapedArray<Float32>(converting: hiddenStates[0])
+                hidden0 = MLShapedArray(scalars: hidden0.scalars, shape: [1]+hidden0.shape)
+                let noise_pred_uncond = try unet.predictNoise(
+                  latents: latents,
+                  timeStep: t,
+                  hiddenStates: hidden0,
+                  additionalResiduals: additionalResiduals
+                )
+
+                var hidden1 = MLShapedArray<Float32>(converting: hiddenStates[1])
+                hidden1 = MLShapedArray(scalars: hidden1.scalars, shape: [1]+hidden1.shape)
+                let noise_pred_text = try unet.predictNoise(
+                  latents: latents,
+                  timeStep: t,
+                  hiddenStates: hidden1,
+                  additionalResiduals: additionalResiduals
+                )
+
+                noise = [MLShapedArray<Float32>(concatenating: [noise_pred_uncond[0], noise_pred_text[0]],
+                                                alongAxis: 0)]
+            }
 
             if config.guidanceScale >= 1.0 {
                 noise = performGuidance(noise, config.guidanceScale)
