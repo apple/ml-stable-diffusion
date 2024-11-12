@@ -444,9 +444,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-version",
         required=True,
+        choices=("runwayml/stable-diffusion-v1-5", "stabilityai/stable-diffusion-2-1-base"),
         help=
-        ("The pre-trained model checkpoint and configuration to restore. "
-         "For available versions: https://huggingface.co/models?search=stable-diffusion."
+        ("The pre-trained model checkpoint and configuration to restore"
     ))
     parser.add_argument(
         "--generate-calibration-data",
@@ -485,7 +485,5 @@ if __name__ == "__main__":
                         help="PSNR threshold for attention (Einsum) layers (default for stabilityai/stable-diffusion-2-1-base)"
     )
     args = parser.parse_args()
-    if 'xl' in args.model_version:
-        raise NotImplementedError("Not supported for Stable Diffusion XL models")
 
     main(args)
