@@ -337,7 +337,7 @@ def patched_make_causal_mask(input_ids_shape, dtype, device, past_key_values_len
         mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
     
-modeling_clip._make_causal_mask = patched_make_causal_mask # For transformers < 4.35.0
+modeling_clip._make_causal_mask = patched_make_causal_mask # For transformers >= 4.30.0 and transformers < 4.35.0
 modeling_clip._create_4d_causal_attention_mask = patched_make_causal_mask # For transformers >= 4.35.0
 
 def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
