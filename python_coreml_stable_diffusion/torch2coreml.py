@@ -335,8 +335,10 @@ def patched_make_causal_mask(input_ids_shape, dtype, device, past_key_values_len
         mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
-modeling_clip._make_causal_mask = patched_make_causal_mask
-modeling_clip._create_4d_causal_attention_mask = patched_make_causal_mask
+# Starting from transformers >= 4.35.0, the _make_causal_mask function is replaced by _create_4d_causal_attention_mask in modeling_clip.
+# For backward compatibility with versions < 4.35.0, both functions are patched here.
+modeling_clip._make_causal_mask = patched_make_causal_mask # For transformers < 4.35.0
+modeling_clip._create_4d_causal_attention_mask = patched_make_causal_mask # For transformers >= 4.35.0
 
 def convert_text_encoder(text_encoder, tokenizer, submodule_name, args):
     """ Converts the text encoder component of Stable Diffusion
