@@ -246,6 +246,75 @@ An example `<selected-recipe-string-key>` would be `"recipe_4.50_bit_mixedpalett
 
 </details>
 
+## <a name="activation-quant"></a> Activation Quantization
+
+<details>
+  <summary> Details (Click to expand) </summary>
+
+On newer hardware with A17 Pro or M4 chips, such as the iPhone 15 Pro, quantizing both activations and weight to int8 can leverage optimized compute on the Neural Engine which can be used to improve runtime latency in compute-bound models.
+
+In this section, we demonstrate how to apply [Post Training Activation Quantization](https://apple.github.io/coremltools/docs-guides/source/opt-quantization-algos.html#post-training-data-calibration-activation-quantization), using calibration data, on Stable Diffusion UNet model. 
+
+Similar to Mixed-Bit Palettization (MBP) described [above](#a-namecompression-lower-than-6-bitsa-advanced-weight-compression-lower-than-6-bits), we first do a per-layer analysis to determine which layers are more sensitive to compression. 
+Less sensitive layer are weight and activation quantized (W8A8), whereas more sensitive layers are only weight quantized (W8A16).
+
+Here are the steps for applying this technique:
+
+**Step 1:** Generate calibration data 
+            
+```python
+python -m python_coreml_stable_diffusion.activation_quantization --model-version <model-version> --generate-calibration-data  -o <output-dir>
+```
+
+A set of calibration text prompts are run through StableDiffusionPipeline and UNet model inputs are recorded.
+
+**Step 2:** Run layer-wise sensitivity analysis 
+
+```python
+python -m python_coreml_stable_diffusion.activation_quantization --model-version <model-version> --layerwise-sensitivity --calibration-nsamples <num-samples> -o <output-dir>
+```
+
+We run this analysis on all Convolutional and Attention (Einsum) modules in the model. 
+For each module, we generate a compressed version by quantizing only that layer’s weights and activations. 
+We then calculate the PSNR between the outputs of the compressed and original model, using the same random seed and text prompts. 
+
+This analysis takes up to a few hours on a single GPU (cuda). The number of calibration samples used to quantize the model can be reduced to speed up the process. 
+ 
+The resulting JSON file looks like this:
+
+```json
+{
+  "conv": {
+    "conv_in": 30.74,
+    "down_blocks.0.attentions.0.proj_in": 38.93,
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q": 48.15,
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_k": 50.13,
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_v": 45.70,
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_out.0": 39.56,
+    ...
+  },
+  "einsum": {
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn1.einsum": 25.34,
+    "down_blocks.0.attentions.0.transformer_blocks.0.attn2.einsum": 31.76,
+    "down_blocks.0.attentions.1.transformer_blocks.0.attn1.einsum": 23.40,
+    "down_blocks.0.attentions.1.transformer_blocks.0.attn2.einsum": 31.56,
+    ...
+  },
+  "model_version": "stabilityai/stable-diffusion-2-1-base"
+}
+```
+
+**Step 3:** Generate quantized model 
+
+Using calibration data and layer-wise sensitivity we can generate the quantized CoreML model as follows: 
+
+```python
+python -m python_coreml_stable_diffusion.activation_quantization --model-version <model-version> --quantize-pytorch --conv-psnr 38 --attn-psnr 26 -o <output-dir>
+```
+
+The PSNR thresholds determine which layers will be activation quantized. This number can be tuned to trade-off between output quality and inference latency.  
+
+</details>
 
 ## <a name="using-stable-diffusion-3"></a> Using Stable Diffusion 3
 
