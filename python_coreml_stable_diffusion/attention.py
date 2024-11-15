@@ -5,6 +5,9 @@ logger.setLevel(logging.INFO)
 
 import torch
 import math
+
+SPLIT_SOFTMAX = False
+
 def softmax(x, dim):
     # Reduction max
     max_x = x.max(dim=dim, keepdim=True).values
@@ -51,9 +54,15 @@ def split_einsum(q, k, v, mask, heads, dim_head):
         for head_idx in range(heads):
             attn_weights[head_idx] = attn_weights[head_idx] + mask
 
-    attn_weights = [
-        softmax(aw, dim=1) for aw in attn_weights
-    ]  # (bs, max_seq_length, 1, max_seq_length) * heads
+    if SPLIT_SOFTMAX:
+        attn_weights = [
+            softmax(aw, dim=1) for aw in attn_weights
+        ]  # (bs, max_seq_length, 1, max_seq_length) * heads
+    else:
+        attn_weights = [
+            aw.softmax(dim=1) for aw in attn_weights
+        ]  # (bs, max_seq_length, 1, max_seq_length) * heads
+
     attn = [
         torch.einsum("bkhq,bchk->bchq", wi, vi)
         for wi, vi in zip(attn_weights, mh_v)

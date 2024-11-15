@@ -26,10 +26,13 @@ from coremltools.optimize.torch.quantization import (
 from diffusers import StableDiffusionPipeline
 from tqdm import tqdm
 
+from python_coreml_stable_diffusion import attention
 from python_coreml_stable_diffusion import unet
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
 from python_coreml_stable_diffusion.torch2coreml import compute_psnr
 from python_coreml_stable_diffusion.unet import Einsum
+
+attention.SPLIT_SOFTMAX = True
 
 CALIBRATION_DATA = [
     "image of a transparent tall glass with ice, fruits and mint, photograph, commercial, food, warm background, beautiful image, detailed",
