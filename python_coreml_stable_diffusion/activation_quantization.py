@@ -22,11 +22,9 @@ from copy import deepcopy
 import coremltools as ct
 import numpy as np
 from coremltools.optimize.torch.quantization import (
-    LinearQuantizer,
-    LinearQuantizerConfig,
-    ModuleLinearQuantizerConfig
-)
+    LinearQuantizer, LinearQuantizerConfig, ModuleLinearQuantizerConfig)
 from diffusers import StableDiffusionPipeline
+from tqdm import tqdm
 
 from python_coreml_stable_diffusion import unet
 from python_coreml_stable_diffusion.layer_norm import LayerNormANE
@@ -213,6 +211,33 @@ def get_quantizable_modules(unet):
 
     return quantizable_modules
 
+def recipe_overrides_for_inference_speedup(conv_layers, skipped_conv):
+    """
+    Quantize the slowest conv layers, even if in skipped set based on PSNR, for good inference speedup
+    """
+    for layer in conv_layers:
+        if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
+            if layer in skipped_conv:
+                logger.info(f"removing {layer}")
+                skipped_conv.remove(layer)
+        if "upsamplers" in layer:
+            if layer in skipped_conv:
+                logger.info(f"removing {layer}")
+                skipped_conv.remove(layer)
+
+def recipe_overrides_for_quality(conv_layers, skipped_conv):
+    """
+    Do not quantize out projection layers to avoid quantizing outputs of preceding concat layers.
+    Quantizing output of concat layers can lead to quality degradation, due to sharing of scales
+    across concat inputs, which can have varied ranges. Since this is a constraint enforced during
+    model conversion, it may not be captured in layer-wise PSNR analysis of PyTorch model.
+    """
+    out_proj_layers = [layer for layer in conv_layers if "to_out" in layer]
+    for layer in out_proj_layers:
+        if layer not in skipped_conv:
+            logger.info(f"adding {layer}")
+            skipped_conv.add(layer)
+
 def register_input_log_hook(unet, inputs):
     """
     Register forward pre hook to save model inputs 
@@ -344,7 +369,7 @@ def main(args):
         }
         dataloader = unet_data_loader(calibration_dir, device, args.calibration_nsamples)
 
-        for module_type, module_name in quantizable_modules:
+        for module_type, module_name in tqdm(quantizable_modules):
             logger.info(f"Quantizing UNet Layer: {module_name}")
             config = quantize_module_config(module_name)
             quantized_unet = quantize(ref_pipe.unet, config, dataloader)
@@ -377,24 +402,10 @@ def main(args):
         skipped_conv = set([layer for layer, psnr in results['conv'].items() if psnr < args.conv_psnr])
         skipped_einsum = set([layer for layer, psnr in results['einsum'].items() if psnr < args.attn_psnr])
 
-        for layer in results['conv'].keys():
-            # Quantize the slowest conv layers, even if in skipped set based on PSNR, for good inference speedup
-            if "up_blocks" in layer and "resnets" in layer and "conv1" in layer:
-                if layer in skipped_conv:
-                    logger.info(f"removing {layer}")
-                    skipped_conv.remove(layer)
-            if "upsamplers" in layer:
-                if layer in skipped_conv:
-                    logger.info(f"removing {layer}")
-                    skipped_conv.remove(layer)
-            # Do not quantize out projection layers to avoid quantizing outputs of preceding concat layers.
-            # Quantizing output of concat layers can lead to quality degradation, due to sharing of scales
-            # across concat inputs, which can have varied ranges. Since this is a constraint enforced during
-            # model conversion, it may not be captured in layer-wise PSNR analysis of PyTorch model.
-            if "to_out" in layer:
-                if layer not in skipped_conv:
-                    logger.info(f"adding {layer}")
-                    skipped_conv.add(layer)
+        # Apply some overrides on PSNR based recipe for inference and quality improvements
+        # Users can disable these selectively based on specific targets
+        recipe_overrides_for_inference_speedup(results['conv'].keys(), skipped_conv)
+        recipe_overrides_for_quality(results['conv'].keys(), skipped_conv)
 
         config = quantize_cumulative_config(skipped_conv, skipped_einsum)
         quantized_unet = quantize(ref_pipe.unet, config, dataloader)
