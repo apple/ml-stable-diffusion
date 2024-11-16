@@ -5,48 +5,50 @@
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers import ModelMixin
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .unet import Timesteps, TimestepEmbedding, get_down_block, UNetMidBlock2DCrossAttn, linear_to_conv2d_map
+
 
 class ControlNetConditioningEmbedding(nn.Module):
     """
     Embeds conditioning input into a feature space suitable for ControlNet.
     """
+
     def __init__(self, conditioning_embedding_channels, conditioning_channels=3, block_out_channels=(16, 32, 96, 256)):
         super().__init__()
+        # Initial convolution
         self.conv_in = nn.Conv2d(conditioning_channels, block_out_channels[0], kernel_size=3, padding=1)
-        self.blocks = nn.ModuleList()
 
-        # Create convolutional blocks with increasing channels
-        for i in range(len(block_out_channels) - 1):
-            channel_in = block_out_channels[i]
-            channel_out = block_out_channels[i + 1]
-            self.blocks.append(nn.Conv2d(channel_in, channel_in, kernel_size=3, padding=1))
-            self.blocks.append(nn.Conv2d(channel_in, channel_out, kernel_size=3, padding=1, stride=2))
+        # Convolutional blocks for progressive embedding
+        self.blocks = nn.ModuleList(
+            [
+                nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+                if i % 2 == 0
+                else nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, stride=2)
+                for i, (in_channels, out_channels) in enumerate(zip(block_out_channels[:-1], block_out_channels[1:]))
+            ]
+        )
 
+        # Final embedding convolution
         self.conv_out = nn.Conv2d(block_out_channels[-1], conditioning_embedding_channels, kernel_size=3, padding=1)
 
     def forward(self, conditioning):
-        # Apply initial convolution
-        embedding = self.conv_in(conditioning)
-        embedding = F.silu(embedding)
-
-        # Pass through convolutional blocks
+        # Process the conditioning input through the embedding layers
+        embedding = F.silu(self.conv_in(conditioning))
         for block in self.blocks:
-            embedding = block(embedding)
-            embedding = F.silu(embedding)
-
-        # Apply output convolution
-        embedding = self.conv_out(embedding)
-        return embedding
+            embedding = F.silu(block(embedding))
+        return self.conv_out(embedding)
 
 
 class ControlNetModel(ModelMixin, ConfigMixin):
     """
-    ControlNet Model for diffusion-based tasks with flexible conditioning mechanisms.
+    Implements a ControlNet model with flexible configuration for conditioning, downsampling, and cross-attention blocks.
     """
+
     @register_to_config
     def __init__(
         self,
@@ -73,13 +75,13 @@ class ControlNetModel(ModelMixin, ConfigMixin):
     ):
         super().__init__()
 
-        # Validate configuration parameters
+        # Validate inputs
         if len(block_out_channels) != len(down_block_types):
             raise ValueError(
-                f"Number of `block_out_channels` ({len(block_out_channels)}) must match number of `down_block_types` ({len(down_block_types)})."
+                f"`block_out_channels` length must match `down_block_types` length. Received {len(block_out_channels)} and {len(down_block_types)}."
             )
 
-        # Handle scalar inputs for list-based configuration
+        # Convert scalar parameters into lists if needed
         if isinstance(only_cross_attention, bool):
             only_cross_attention = [only_cross_attention] * len(down_block_types)
         if isinstance(attention_head_dim, int):
@@ -90,13 +92,15 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         # Register pre-hook for state dict mapping
         self._register_load_state_dict_pre_hook(linear_to_conv2d_map)
 
-        # Initial convolution and embeddings
+        # Initial convolution
         self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], kernel_size=3, padding=1)
+
+        # Time embedding
         time_embed_dim = block_out_channels[0] * 4
         self.time_proj = Timesteps(block_out_channels[0], flip_sin_to_cos, freq_shift)
         self.time_embedding = TimestepEmbedding(block_out_channels[0], time_embed_dim)
 
-        # Conditioning embedding for ControlNet
+        # ControlNet conditioning embedding
         self.controlnet_cond_embedding = ControlNetConditioningEmbedding(
             conditioning_embedding_channels=block_out_channels[0],
             block_out_channels=conditioning_embedding_out_channels,
@@ -104,16 +108,14 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
         # Down blocks
         self.down_blocks = nn.ModuleList()
-        self.controlnet_down_blocks = nn.ModuleList()
-        output_channel = block_out_channels[0]
-        self.controlnet_down_blocks.append(nn.Conv2d(output_channel, output_channel, kernel_size=1))
+        self.controlnet_down_blocks = nn.ModuleList([nn.Conv2d(block_out_channels[0], block_out_channels[0], kernel_size=1)])
 
+        output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
             input_channel = output_channel
             output_channel = block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
 
-            # Create down block
             down_block = get_down_block(
                 down_block_type,
                 transformer_layers_per_block=transformer_layers_per_block[i],
@@ -130,15 +132,14 @@ class ControlNetModel(ModelMixin, ConfigMixin):
             )
             self.down_blocks.append(down_block)
 
-            # Create control blocks for residuals
-            for _ in range(layers_per_block + (1 if not is_final_block else 0)):
+            # Add corresponding ControlNet blocks
+            for _ in range(layers_per_block + (0 if is_final_block else 1)):
                 self.controlnet_down_blocks.append(nn.Conv2d(output_channel, output_channel, kernel_size=1))
 
         # Mid block
-        mid_block_channel = block_out_channels[-1]
-        self.controlnet_mid_block = nn.Conv2d(mid_block_channel, mid_block_channel, kernel_size=1)
+        self.controlnet_mid_block = nn.Conv2d(block_out_channels[-1], block_out_channels[-1], kernel_size=1)
         self.mid_block = UNetMidBlock2DCrossAttn(
-            in_channels=mid_block_channel,
+            in_channels=block_out_channels[-1],
             temb_channels=time_embed_dim,
             resnet_eps=norm_eps,
             resnet_act_fn=act_fn,
@@ -153,9 +154,9 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
     def get_num_residuals(self):
         """
-        Returns the total number of residual connections in the model.
+        Returns the total number of residual connections.
         """
-        num_res = 2  # Initial sample + mid block
+        num_res = 2  # Includes initial sample and mid block
         for down_block in self.down_blocks:
             num_res += len(down_block.resnets)
             if hasattr(down_block, "downsamplers") and down_block.downsamplers is not None:
@@ -164,13 +165,13 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
     def forward(self, sample, timestep, encoder_hidden_states, controlnet_cond):
         """
-        Performs the forward pass through the ControlNet model.
+        Forward pass through the ControlNet model.
         """
         # Time embedding
         t_emb = self.time_proj(timestep)
         emb = self.time_embedding(t_emb)
 
-        # Initial convolution and conditioning
+        # Input convolution and conditioning
         sample = self.conv_in(sample)
         controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
         sample += controlnet_cond
@@ -190,13 +191,10 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         if self.mid_block is not None:
             sample = self.mid_block(sample, emb, encoder_hidden_states=encoder_hidden_states)
 
-        # ControlNet conditioning
+        # ControlNet-specific processing
         controlnet_down_block_res_samples = ()
         for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
-            down_block_res_sample = controlnet_block(down_block_res_sample)
-            controlnet_down_block_res_samples += (down_block_res_sample,)
+            controlnet_down_block_res_samples += (controlnet_block(down_block_res_sample),)
 
-        # Return final samples
-        down_block_res_samples = controlnet_down_block_res_samples
-        mid_block_res_sample = self.controlnet_mid_block(sample)
-        return down_block_res_samples, mid_block_res_sample
+        # Return results
+        return controlnet_down_block_res_samples, self.controlnet_mid_block(sample)
