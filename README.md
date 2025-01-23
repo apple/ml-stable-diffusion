@@ -452,7 +452,7 @@ Resources:
 <details>
   <summary> Click to expand </summary>
 
-🤗 Hugging Face ran the [conversion procedure](#converting-models-to-coreml) on the following models and made the Core ML weights publicly available on the Hub. If you would like to convert a version of Stable Diffusion that is not already available on the Hub, please refer to the [Converting Models to Core ML](#converting-models-to-core-ml).
+🤗 Hugging Face ran the [conversion procedure](#converting-models-to-coreml) on the following models and made the Core ML weights publicly available on the Hub. If you would like to convert a version of Stable Diffusion that is not already available on the Hub, please refer to the [Converting Models to Core ML](#converting-models-to-coreml).
 
 * 6-bit quantized models (suitable for iOS 17 and macOS 14):
   - [`CompVis/stable-diffusion-v1-4`](https://huggingface.co/apple/coreml-stable-diffusion-1-4-palettized)
@@ -495,7 +495,7 @@ git lfs install
 git clone https://huggingface.co/apple/coreml-stable-diffusion-v1-4
 ```
 
-If you prefer to download specific variants instead of cloning the repos, you can use the `huggingface_hub` Python library. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-core-ml) for details), you could use the following helper code:
+If you prefer to download specific variants instead of cloning the repos, you can use the `huggingface_hub` Python library. For example, to do generation in Python using the `ORIGINAL` attention implementation (read [this section](#converting-models-to-coreml) for details), you could use the following helper code:
 
 ```Python
 from huggingface_hub import snapshot_download
