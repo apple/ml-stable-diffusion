@@ -126,10 +126,11 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
         coreml_model.compute_unit = compute_unit
     else:
         logger.info(f"Converting {submodule_name} to CoreML..")
+        deployment_target = _get_deployment_target(args.min_deployment_target)
         coreml_model = ct.convert(
             torchscript_module,
             convert_to="mlprogram",
-            minimum_deployment_target=ct.target.macOS13,
+            minimum_deployment_target=deployment_target,
             inputs=_get_coreml_inputs(sample_inputs, args),
             outputs=[ct.TensorType(name=name, dtype=np.float32) for name in output_names],
             compute_units=compute_unit,
@@ -141,6 +142,41 @@ def _convert_to_coreml(submodule_name, torchscript_module, sample_inputs,
         gc.collect()
 
     return coreml_model, out_path
+
+
+def _get_deployment_target(target_string):
+    """
+    Convert deployment target string to coremltools target object.
+    
+    Args:
+        target_string (str): Target deployment string (e.g., "macOS13", "iOS18")
+        
+    Returns:
+        coremltools target object
+    """
+    target_map = {
+        "macOS13": ct.target.macOS13,
+        "macOS14": ct.target.macOS14,
+        "iOS16": ct.target.iOS16,
+        "iOS17": ct.target.iOS17,
+    }
+    
+    # Handle newer targets that might not be available in older coremltools versions
+    try:
+        if target_string == "macOS15":
+            return ct.target.macOS15
+        elif target_string == "iOS18":
+            return ct.target.iOS18
+    except AttributeError:
+        logger.warning(f"Deployment target {target_string} not available in this coremltools version. "
+                      f"Using macOS14 as fallback.")
+        return ct.target.macOS14
+    
+    if target_string in target_map:
+        return target_map[target_string]
+    else:
+        logger.warning(f"Unknown deployment target {target_string}. Using macOS13 as fallback.")
+        return ct.target.macOS13
 
 
 def quantize_weights(args):
@@ -1718,6 +1754,16 @@ def parser_spec():
         default=
         "https://huggingface.co/google-t5/t5-small/resolve/main/tokenizer.json",
         help="The URL to the merged pairs used in by the text tokenizer.")
+    parser.add_argument(
+        "--min-deployment-target",
+        default="macOS13",
+        help=(
+            "Minimum deployment target for Core ML models. "
+            "Valid options include macOS13, macOS14, macOS15, iOS16, iOS17, iOS18. "
+            "For iOS 18 compatibility with advanced quantization features, use iOS18. "
+            "Default is macOS13 for backwards compatibility."
+        )
+    )
     parser.add_argument(
         "--xl-version",
         action="store_true",
