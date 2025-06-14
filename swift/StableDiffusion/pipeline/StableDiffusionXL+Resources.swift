@@ -92,14 +92,36 @@ public extension StableDiffusionXLPipeline {
 
 
         // Image Decoder
-        // FIXME: Hardcoding to .cpuAndGPU since ANE doesn't support FLOAT32
+        // VAE (Variational AutoEncoder) models use FLOAT32 precision which is not supported by Apple Neural Engine (ANE)
+        // We need to adjust compute units to ensure compatibility across different device configurations
         let vaeConfig = config.copy() as! MLModelConfiguration
-        vaeConfig.computeUnits = .cpuAndGPU
+        
+        // Handle different compute unit configurations for VAE decoder/encoder
+        switch config.computeUnits {
+        case .cpuOnly:
+            // When CPU-only is explicitly requested, honor this setting for VAE
+            // This fixes the gray image issue when users select cpuOnly compute units
+            vaeConfig.computeUnits = .cpuOnly
+        case .cpuAndNeuralEngine:
+            // ANE doesn't support FLOAT32, so fallback to CPU+GPU for better performance
+            vaeConfig.computeUnits = .cpuAndGPU
+        case .all:
+            // For .all, use CPU+GPU since ANE doesn't support FLOAT32 operations
+            vaeConfig.computeUnits = .cpuAndGPU
+        case .cpuAndGPU:
+            // Keep CPU+GPU configuration as requested
+            vaeConfig.computeUnits = .cpuAndGPU
+        @unknown default:
+            // For any unknown/future compute units, default to CPU+GPU as safest option
+            vaeConfig.computeUnits = .cpuAndGPU
+        }
+        
         let decoder = Decoder(modelAt: urls.decoderURL, configuration: vaeConfig)
 
         // Optional Image Encoder
         let encoder: Encoder?
         if FileManager.default.fileExists(atPath: urls.encoderURL.path) {
+            // Use the same VAE configuration for consistency
             encoder = Encoder(modelAt: urls.encoderURL, configuration: vaeConfig)
         } else {
             encoder = nil
