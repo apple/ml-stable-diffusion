@@ -121,7 +121,21 @@ public extension StableDiffusionPipeline {
         }
 
         // Image Decoder
-        let decoder = Decoder(modelAt: urls.decoderURL, configuration: config)
+        // VAE (Variational AutoEncoder) models use FLOAT32 precision
+        // Ensure compatibility with different compute unit configurations
+        let vaeConfig = config.copy() as! MLModelConfiguration
+        
+        // Handle compute unit compatibility for VAE operations
+        switch config.computeUnits {
+        case .cpuAndNeuralEngine:
+            // ANE doesn't support FLOAT32, so use CPU+GPU for VAE operations
+            vaeConfig.computeUnits = .cpuAndGPU
+        default:
+            // For other compute units (cpuOnly, cpuAndGPU, all), use the original configuration
+            vaeConfig.computeUnits = config.computeUnits
+        }
+        
+        let decoder = Decoder(modelAt: urls.decoderURL, configuration: vaeConfig)
 
         // Optional safety checker
         var safetyChecker: SafetyChecker? = nil
@@ -133,7 +147,8 @@ public extension StableDiffusionPipeline {
         // Optional Image Encoder
         let encoder: Encoder?
         if FileManager.default.fileExists(atPath: urls.encoderURL.path) {
-            encoder = Encoder(modelAt: urls.encoderURL, configuration: config)
+            // Use the same VAE configuration for consistency
+            encoder = Encoder(modelAt: urls.encoderURL, configuration: vaeConfig)
         } else {
             encoder = nil
         }
