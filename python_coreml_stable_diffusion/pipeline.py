@@ -311,7 +311,14 @@ class CoreMLStableDiffusionPipeline(DiffusionPipeline):
         return image, has_nsfw_concept
 
     def decode_latents(self, latents):
-        latents = 1 / 0.18215 * latents
+
+        if self.xl:
+            scaling_factor =0.13025
+        else:
+            scaling_factor = 0.18215
+
+        latents = 1 / scaling_factor * latents
+
         dtype = self.vae_decoder.expected_inputs['z']['dtype']
         image = self.vae_decoder(z=latents.astype(dtype))["image"]
         image = np.clip(image / 2 + 0.5, 0, 1)
