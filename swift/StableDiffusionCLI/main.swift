@@ -65,7 +65,7 @@ struct StableDiffusionSample: ParsableCommand {
     @Option(help: "Output path")
     var outputPath: String = "./"
 
-    @Option(help: "Random seed")
+    @Option(help: "Provide set seed value, defaults to random seed")
     var seed: UInt32 = UInt32.random(in: 0...UInt32.max)
 
     @Option(help: "Controls the influence of the text prompt on sampling process (0=random images)")
