@@ -91,9 +91,9 @@ public struct TextEncoderT5: TextEncoderT5Model {
 
         let attentionMaskName = "attention_mask"
         var attentionMask: [Int] = inputIds.map { token in
-            token == padToken ? maskToken : padToken
+            token == padToken ? padToken : maskToken
         }
-        attentionMask[0] = bosToken
+        attentionMask[0] = eosToken
 
         let floatIds = inputIds.map { Float32($0) }
         let floatMask = attentionMask.map { Float32($0) }
