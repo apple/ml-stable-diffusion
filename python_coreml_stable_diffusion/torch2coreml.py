@@ -666,7 +666,7 @@ def convert_vae_decoder_sd3(args):
     coreml_vae_decoder.author = f"Please refer to the Model Card available at huggingface.co/{args.model_version}"
     coreml_vae_decoder.license = "Stability AI Community License (https://huggingface.co/stabilityai/stable-diffusion-3-medium/blob/main/LICENSE.md)"
     coreml_vae_decoder.version = args.model_version
-    coreml_vae_decodershort_description = \
+    coreml_vae_decoder.short_description = \
         "Stable Diffusion 3 generates images conditioned on text or other images as input through the diffusion process. " \
         "Please refer to https://arxiv.org/pdf/2403.03206 for details."
 
